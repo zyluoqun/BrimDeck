@@ -1,0 +1,4 @@
+{
+  "endpoint": "https://your-server.example/api/companion/market",
+  "token": "YOUR_READ_ONLY_MARKET_TOKEN"
+}

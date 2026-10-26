@@ -59,6 +59,14 @@ public sealed partial class SettingsWindow
         foreach (var part in S.CompactOrder(style)) rows.Children.Add(PartRow(style, part, rows));
         UpdateDividers(rows);
         Group(rows, ClockRow(style, PartHandleWidth));
+        if (style == CompactStyle.Capsule)
+        {
+            Group(Toggle(Loc.T("显示币种行情", "Show coin market ticker"), S.CapsuleMarket, value => Change(s => s.CapsuleMarket = value)),
+                MusicChoice(Loc.T("显示榜单", "Market ranking"), S.MarketRanking,
+                    new[] { (MarketRanking.Hot, Loc.T("热门", "Hot")), (MarketRanking.Gainers, Loc.T("涨幅榜", "Gainers")), (MarketRanking.Losers, Loc.T("跌幅榜", "Losers")) },
+                    value => Change(s => s.MarketRanking = value)),
+                TextLine(Loc.T("开启时胶囊常驻显示币种和24H涨跌幅，暂停悬停展开；点击币种打开图表，右键打开设置。关闭后恢复上方显示内容。", "When enabled, the capsule shows coin symbols and 24h changes without hover expansion. Click a coin for its chart; right-click for settings. Disable to restore the content above."), 11, TextSecondary));
+        }
     }
 
     private const double PartRowHeight = 44, PartHandleWidth = 40;

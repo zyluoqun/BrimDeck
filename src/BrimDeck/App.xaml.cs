@@ -65,8 +65,14 @@ public partial class App : Application
         }
         SetCurrentProcessExplicitAppUserModelID("BrimDeck.Desktop");
         RecordCrashes();
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
+        bool portable = File.Exists(Path.Combine(AppContext.BaseDirectory, "portable.flag"));
+        var folder = portable ? Path.Combine(AppContext.BaseDirectory, "data") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
+        if (portable && Store.IsFirstStart)
+        {
+            Settings.Style = CompactStyle.Capsule; Settings.CapsuleMarket = true;
+            Settings.CapsuleWidth = 720; Settings.CapsuleAutoWidth = false; Settings.Maximized = WindowBehavior.Normal;
+        }
         UseLanguage();
         PanelTheme.Use(Settings);
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
@@ -77,7 +83,7 @@ public partial class App : Application
         {
             Settings.LaunchAtStartup = StartupRegistration.IsEnabled();
             // When moving from the old EXE to an installed copy, keep an enabled startup entry at the new stable path.
-            if (Settings.LaunchAtStartup) StartupRegistration.SetEnabled(true);
+            if (Settings.LaunchAtStartup && !portable) StartupRegistration.SetEnabled(true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
         Prices = new Pricing(folder);
@@ -88,6 +94,7 @@ public partial class App : Application
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
+        StartMarketFeed();
         InitializeHotkeys();
         StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
@@ -165,6 +172,7 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
+        _ = RefreshMarketAsync();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -301,6 +309,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        _marketTimer.Stop(); _marketHttp.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
