@@ -1,0 +1,37 @@
+name: Build portable market edition
+on:
+  push:
+    branches: [main, market-capsule-portable]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and test
+        run: |
+          dotnet build BrimDeck.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+          dotnet run --project tests/BrimDeck.Tests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+          dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
+      - name: Publish self-contained portable folder
+        run: ./scripts/Publish-Portable.ps1
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: BrimDeck-Market-Portable-win-x64
+          path: artifacts/portable/
+          if-no-files-found: error
