@@ -13,8 +13,8 @@ internal static class MarketCompositionTests
         check("Enabling market content preserves original switches, hover delays and window behavior", before ==
             (settings.CapsuleSummary, settings.CapsuleMusic, settings.CapsuleMonitor, settings.CapsuleClock,
                 settings.OpenDelay, settings.CloseDelay, settings.Maximized, settings.Borderless, settings.Exclusive));
-        check("Market is an additional capsule part and does not change notch content", settings.CapsuleOrder.Contains(CompactPart.Market)
-            && settings.CapsuleOrder.Count == 4 && !settings.NotchOrder.Contains(CompactPart.Market));
+        check("Both text styles add market as an optional content part", settings.CapsuleOrder.Contains(CompactPart.Market)
+            && settings.CapsuleOrder.Count == 4 && settings.NotchOrder.Contains(CompactPart.Market) && !settings.NotchMarket);
         settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Market, CompactPart.Rings, CompactPart.Monitor]);
         var saved = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Market position, ranking and original enabled content survive settings reload", saved.CapsuleOrder.SequenceEqual(settings.CapsuleOrder)

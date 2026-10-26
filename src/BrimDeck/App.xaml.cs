@@ -70,7 +70,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         if (portable && Store.IsFirstStart)
         {
-            Settings.Style = CompactStyle.Capsule; Settings.CapsuleMarket = true;
+            Settings.Style = CompactStyle.Capsule; Settings.CapsuleMarket = Settings.NotchMarket = Settings.LineMarket = true;
         }
         UseLanguage();
         PanelTheme.Use(Settings);

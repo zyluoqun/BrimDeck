@@ -5,11 +5,11 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Market];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
-        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, _ => false
+        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, DeckPage.Market => settings.MarketPage, _ => false
     };
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => Order.Where(page => Shown(settings, page)).ToList();
@@ -22,8 +22,15 @@ public static class DeckPages
     // The page the panel opens on; null keeps the last viewed page.
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
-        DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, _ => null
+        DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, DefaultDeckPage.Market => DeckPage.Market, _ => null
     };
+
+    public static DeckPage OnHover(DeckSettings settings, DeckPage current, bool market)
+    {
+        if (market && settings.MarketPage) return DeckPage.Market;
+        var preferred = Opening(settings.DefaultPage) ?? current;
+        return Shown(settings, preferred) ? preferred : Resolve(settings, current);
+    }
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
     public const double MinWidth = 440, MaxWidth = 1200, MinHeight = 140, MaxHeight = 400;
@@ -40,6 +47,7 @@ public static class DeckPages
         {
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
+            case DeckPage.Market: settings.MarketWidth = width; settings.MarketHeight = height; break;
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -48,6 +56,7 @@ public static class DeckPages
     {
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
+        DeckPage.Market => (settings.MarketWidth, settings.MarketHeight),
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 

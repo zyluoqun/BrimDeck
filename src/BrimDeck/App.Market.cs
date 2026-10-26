@@ -21,7 +21,8 @@ public partial class App
     }
     internal async Task RefreshMarketAsync()
     {
-        if (_marketBusy || Exiting || !Settings.CapsuleMarket) return;
+        if (_marketBusy || Exiting || !(Settings.MarketPage || Settings.CapsuleMarket || Settings.NotchMarket || Settings.LineMarket)) return;
+        _marketTimer.Interval = TimeSpan.FromSeconds(Decks.Any(deck => deck.MarketDemand) ? 15 : 60);
         _marketBusy = true;
         try
         {

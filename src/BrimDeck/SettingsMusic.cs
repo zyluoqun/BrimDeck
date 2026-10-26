@@ -27,6 +27,7 @@ public sealed partial class SettingsWindow
     // The options under the style cards belong to the chosen style. Choosing another card slides the current options
     // out and the chosen style's options in, moving the way the chosen card lies from the previous one.
     private Grid? _styleOptions;
+    private TextBlock? _runtimeAppearance;
     private void ShowStyleOptions(CompactStyle style, CompactStyle? previous)
     {
         if (_styleOptions is not { } host) return;
@@ -49,9 +50,13 @@ public sealed partial class SettingsWindow
     private void StyleOptions(CompactStyle style)
     {
         SectionTitle(Loc.T("显示内容 · ", "Content · ") + StyleName(style));
+        _runtimeAppearance = TextLine(_app.Deck.RuntimeAppearanceDescription, 11, TextSecondary);
+        _runtimeAppearance.TextWrapping = TextWrapping.Wrap; _runtimeAppearance.Margin = new Thickness(0, 0, 0, 12); Target.Children.Add(_runtimeAppearance);
         if (style == CompactStyle.Line)
         {
-            Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)));
+            Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)),
+                Toggle(Loc.T("显示行情状态标记", "Show market status marker"), S.LineMarket, v => Change(s => s.LineMarket = v)), MarketRankingChoice(),
+                TextLine(Loc.T("保留细条高度，行情以右侧短标记显示。悬停展开完整榜单；原音乐进度仍保留。", "Keeps the thin indicator, with a small market marker on its right. Hover for the full ranking; music progress remains available."), 11, TextSecondary));
             return;
         }
         // The rows that can be dragged are in the order the row shows them; the clock always stays at the right, so it comes last.
@@ -59,14 +64,15 @@ public sealed partial class SettingsWindow
         foreach (var part in S.CompactOrder(style)) rows.Children.Add(PartRow(style, part, rows));
         UpdateDividers(rows);
         Group(rows, ClockRow(style, PartHandleWidth));
-        if (style == CompactStyle.Capsule)
+        if (style != CompactStyle.Line)
         {
-            Group(MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,
-                    new[] { (MarketRanking.Hot, Loc.T("热门", "Hot")), (MarketRanking.Gainers, Loc.T("涨幅榜", "Gainers")), (MarketRanking.Losers, Loc.T("跌幅榜", "Losers")) },
-                    value => Change(s => s.MarketRanking = value)),
+            Group(MarketRankingChoice(),
                 TextLine(Loc.T("币种行情与其他已开启内容共同显示，可通过上方开关和拖动手柄控制显示、排序。点击币种打开图表，原有悬停展开功能保持不变。", "Market data appears alongside the other enabled content. Use its switch and drag handle above to show, hide or reorder it. Click a coin for its chart; hover expansion continues to work."), 11, TextSecondary));
+            Group(ActionButton(Loc.T("适配已开启内容的宽度", "Fit width to enabled content"), () => Change(s => s.SetCompactAutoWidth(style, true))));
         }
     }
+    private FrameworkElement MarketRankingChoice() => MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,
+        new[] { (MarketRanking.Hot, Loc.T("热门", "Hot")), (MarketRanking.Gainers, Loc.T("涨幅榜", "Gainers")), (MarketRanking.Losers, Loc.T("跌幅榜", "Losers")) }, value => Change(s => s.MarketRanking = value));
 
     private const double PartRowHeight = 44, PartHandleWidth = 40;
     // One draggable row of the collapsed content: the handle, the name and the switch.
@@ -78,7 +84,7 @@ public sealed partial class SettingsWindow
             CompactPart.Rings => (Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
                 Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧，律动条在右侧。", "Dragging moves only the title or lyric. The cover stays at the left and the equalizer at the right.")),
-            CompactPart.Market => (Loc.T("币种行情", "Coin market ticker"), S.CapsuleMarket,
+            CompactPart.Market => (Loc.T("币种行情", "Coin market ticker"), S.ShowsMarket(style),
                 Loc.T("显示币种名称和24H涨跌幅，与配额环、音乐、系统监控、时钟共同显示。", "Shows coin symbols and 24h changes alongside quotas, music, system readings and the clock.")),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
@@ -88,7 +94,7 @@ public sealed partial class SettingsWindow
             {
                 case CompactPart.Rings: if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; break;
                 case CompactPart.Music: if (notch) s.NotchMusic = on; else s.CapsuleMusic = on; break;
-                case CompactPart.Market: s.CapsuleMarket = on; break;
+                case CompactPart.Market: if (notch) s.NotchMarket = on; else s.CapsuleMarket = on; break;
                 default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
             }
         });

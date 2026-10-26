@@ -32,8 +32,8 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+public enum DeckPage { Usage, Music, Monitor, Market }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Market }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
@@ -42,11 +42,11 @@ public enum CompactMusicText { None, Title, Lyrics }
 public enum CompactPart { Rings, Music, Monitor, Market }
 public static class CompactParts
 {
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
-    public static IReadOnlyList<CompactPart> CapsuleDefault { get; } = [.. Default, CompactPart.Market];
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Market];
+    public static IReadOnlyList<CompactPart> CapsuleDefault { get; } = Default;
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order, bool capsule = false)
-        => [.. (order ?? []).Where(part => Enum.IsDefined(part) && (capsule || part != CompactPart.Market)).Concat(capsule ? CapsuleDefault : Default).Distinct()];
+        => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
@@ -303,6 +303,11 @@ public sealed class DeckSettings
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
     public bool CapsuleMarket { get; set; }
+    public bool NotchMarket { get; set; }
+    public bool LineMarket { get; set; }
+    public bool MarketPage { get; set; } = true;
+    public double MarketWidth { get; set; } = 620;
+    public double MarketHeight { get; set; } = 320;
     public MarketRanking MarketRanking { get; set; }
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
@@ -349,6 +354,7 @@ public sealed class DeckSettings
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public bool ShowsMarket(CompactStyle style) => style switch { CompactStyle.Notch => NotchMarket, CompactStyle.Capsule => CapsuleMarket, _ => LineMarket };
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
     public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
@@ -448,6 +454,8 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        MarketWidth = double.IsFinite(MarketWidth) ? Math.Clamp(MarketWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 620;
+        MarketHeight = double.IsFinite(MarketHeight) ? Math.Clamp(MarketHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 320;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();

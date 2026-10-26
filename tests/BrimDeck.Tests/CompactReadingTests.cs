@@ -255,12 +255,12 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Market];
         var defaults = new DeckSettings();
-        check("Compact order: original parts keep their order and the capsule appends market", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual([.. standard, CompactPart.Market]));
+        check("Compact order: both styles preserve original order and append market", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music])
-            && odd.CapsuleOrder.SequenceEqual([.. standard, CompactPart.Market]));
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Market])
+            && odd.CapsuleOrder.SequenceEqual(standard));
         var settings = new DeckSettings();
         settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]);
         var copy = settings.Copy(); copy.SetCompactOrder(CompactStyle.Capsule, standard);

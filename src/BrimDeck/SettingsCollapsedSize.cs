@@ -149,7 +149,7 @@ public sealed partial class SettingsWindow
 
     // The panel changed the collapsed size or switch from outside this window (a drag, a double click, or content that
     // changed the auto width).
-    internal void CollapsedChanged() { if (IsLoaded && _page == 1) _refreshCollapsedRanges?.Invoke(); }
+    internal void CollapsedChanged() { if (IsLoaded && _page == 1) { _refreshCollapsedRanges?.Invoke(); if (_runtimeAppearance is not null) _runtimeAppearance.Text = _app.Deck.RuntimeAppearanceDescription; } }
 
     private void ChangeCollapsed(Action<DeckSettings> edit)
     {

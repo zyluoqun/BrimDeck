@@ -28,6 +28,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
           dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
+          dotnet run --project tests/BrimDeck.ProductTests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Product UI tests failed.' }
       - name: Publish self-contained portable folder
         run: ./scripts/Publish-Portable.ps1
       - uses: actions/upload-artifact@v7.0.1
