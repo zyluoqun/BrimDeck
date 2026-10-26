@@ -14,6 +14,7 @@ Directory.CreateDirectory(root);
 try
 {
     await MarketFeedTests.Run(Check);
+    MarketCompositionTests.Run(Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);

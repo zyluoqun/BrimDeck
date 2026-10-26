@@ -71,7 +71,6 @@ public partial class App : Application
         if (portable && Store.IsFirstStart)
         {
             Settings.Style = CompactStyle.Capsule; Settings.CapsuleMarket = true;
-            Settings.CapsuleWidth = 720; Settings.CapsuleAutoWidth = false; Settings.Maximized = WindowBehavior.Normal;
         }
         UseLanguage();
         PanelTheme.Use(Settings);

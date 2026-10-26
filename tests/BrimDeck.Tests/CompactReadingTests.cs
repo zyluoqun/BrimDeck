@@ -257,16 +257,16 @@ internal static class CompactReadingTests
     {
         CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
         var defaults = new DeckSettings();
-        check("Compact order: defaults are rings, music, readings", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
+        check("Compact order: original parts keep their order and the capsule appends market", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual([.. standard, CompactPart.Market]));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
         check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music])
-            && odd.CapsuleOrder.SequenceEqual(standard));
+            && odd.CapsuleOrder.SequenceEqual([.. standard, CompactPart.Market]));
         var settings = new DeckSettings();
         settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]);
         var copy = settings.Copy(); copy.SetCompactOrder(CompactStyle.Capsule, standard);
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Market]));
     }
 }

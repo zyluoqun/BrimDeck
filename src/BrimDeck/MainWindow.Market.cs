@@ -7,6 +7,8 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private MarketTickerStrip? _marketStrip;
+    private TimeSpan _marketElapsed;
+    private MarketRanking? _marketRankingRendered;
     private bool MarketCapsuleActive => EffectiveStyle == CompactStyle.Capsule && Settings.CapsuleMarket;
     private void InitializeMarket()
     {
@@ -17,18 +19,16 @@ public partial class MainWindow
     {
         if (MarketCapsuleActive) _marketStrip?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
     }
-    private void RenderMarketStrip()
+    private MarketTickerStrip CreateMarketStrip(double width, double rowHeight, double scale)
     {
-        var shape = Collapsed; _compactRendered = shape;
-        double scale = CompactMusicLayout.SafeScale(shape.Scale);
-        _marketStrip = new MarketTickerStrip(CompactContentWidth(shape), Math.Max(1, 26 * scale), scale,
-            Settings.Animations && SystemParameters.ClientAreaAnimation);
+        if (_marketRankingRendered != Settings.MarketRanking) _marketElapsed = TimeSpan.Zero;
+        _marketRankingRendered = Settings.MarketRanking;
+        _marketStrip = new MarketTickerStrip(width, rowHeight, scale,
+            Settings.Animations && SystemParameters.ClientAreaAnimation, _marketElapsed);
         var menu = new ContextMenu();
         var settings = new MenuItem { Header = Loc.T("设置", "Settings") };
         settings.Click += (_, _) => _app.OpenSettings(); menu.Items.Add(settings); _marketStrip.ContextMenu = menu;
         _marketStrip.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
-        CompactRings.Children.Add(_marketStrip);
-        _compactWanted = 660;
-        UpdateMonitorDemand(); UpdateMusicTimer();
+        return _marketStrip;
     }
 }

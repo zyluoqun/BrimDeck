@@ -835,6 +835,7 @@ public partial class MainWindow
         var shape = Collapsed; _compactRendered = shape;
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double contentWidth = CompactContentWidth(shape);
+        double marketFace = MarketCapsuleActive ? CompactMusicLayout.Whole(CompactMusicLayout.MarketSlot * scale) : 0;
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
@@ -854,14 +855,14 @@ public partial class MainWindow
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null && marketFace == 0, _stripPresence, dpi) : null;
         // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight;
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
@@ -909,19 +910,27 @@ public partial class MainWindow
         // before whichever of the two comes second. Positions are snapped cumulatively from the middle's left edge and kept inside
         // its column, so rounding never pushes one region into the next.
         bool hasRings = layout.RingWidth > 0 && apps.Count > 0, hasText = layout.TextWidth > 0, hasReadings = strip is not null && layout.MonitorWidth > 0 && !layout.MonitorAlone;
-        var parts = Settings.CompactOrder(EffectiveStyle).Where(part => part switch { CompactPart.Rings => hasRings, CompactPart.Music => hasText, _ => hasReadings }).ToList();
+        var parts = Settings.CompactOrder(EffectiveStyle).Where(part => part switch { CompactPart.Rings => hasRings, CompactPart.Music => hasText, CompactPart.Market => layout.MarketWidth > 0, _ => hasReadings }).ToList();
+        var originalParts = parts.Where(part => part != CompactPart.Market).ToList();
         double readingsGap = CompactMusicLayout.Whole(8 * scale), cursor = 0, placed = 0;
         for (int i = 0; i < parts.Count; i++)
         {
             var part = parts[i];
-            double gap = (part == CompactPart.Monitor && (i > 0 || parts.Count == 1)) || (i == 1 && parts[0] == CompactPart.Monitor) ? readingsGap : 0;
-            if (part != CompactPart.Monitor && parts.Take(i).Any(p => p != CompactPart.Monitor)) gap += layout.Between;
-            double width = part switch { CompactPart.Rings => layout.RingWidth, CompactPart.Music => layout.TextWidth, _ => Math.Max(0, layout.MonitorWidth - readingsGap) };
+            int originalIndex = originalParts.IndexOf(part);
+            double gap = part == CompactPart.Market ? (i > 0 ? layout.MarketGap : 0)
+                : (part == CompactPart.Monitor && (originalIndex > 0 || originalParts.Count == 1)) || (originalIndex == 1 && originalParts[0] == CompactPart.Monitor) ? readingsGap : 0;
+            if (part != CompactPart.Market)
+            {
+                if (part != CompactPart.Monitor && originalParts.Take(originalIndex).Any(p => p != CompactPart.Monitor)) gap += layout.Between;
+                if (i == 1 && parts[0] == CompactPart.Market) gap += layout.MarketGap;
+            }
+            double width = part switch { CompactPart.Rings => layout.RingWidth, CompactPart.Music => layout.TextWidth, CompactPart.Market => layout.MarketWidth, _ => Math.Max(0, layout.MonitorWidth - readingsGap) };
             double start = Math.Min(middleColumn, SnapDown(cursor + gap, dpi)), end = Math.Min(middleColumn, SnapDown(cursor + gap + width, dpi));
             cursor += gap + width;
             FrameworkElement element = part switch
             {
                 CompactPart.Rings => _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation),
+                CompactPart.Market => CreateMarketStrip(end - start, row, scale),
                 // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
                 CompactPart.Music => _compactMarquee = new MusicMarquee { Text = text, Width = end - start, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                     ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay },
@@ -972,6 +981,7 @@ public partial class MainWindow
         bool running = IsVisible && !IsSuppressed && !_expanded && _alert is null;
         _quotaCarousel?.SetRunning(running, _pointerInside);
         _stripCarousel?.SetRunning(running, _pointerInside);
+        _marketStrip?.SetRunning(running, _pointerInside);
     }
     private bool MusicPresentationVisible => IsVisible && !IsSuppressed && _mediaTrack is { State: not MediaState.Stopped }
         && (_expanded ? IsMusicPage : Settings.ShowsMusic(EffectiveStyle) && _alert is null);

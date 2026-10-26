@@ -97,7 +97,7 @@ public partial class MainWindow : Window
         _hover = new(Dispatcher, () =>
         {
             _hover!.Stop();
-            if (IsSuppressed || !_pointerInside || MarketCapsuleActive) return;
+            if (IsSuppressed || !_pointerInside) return;
             // Opened by hovering: the panel centres on the pointer (see SetExpanded).
             if (PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
             SetExpanded(true);
@@ -414,12 +414,12 @@ public partial class MainWindow : Window
     internal void RenderCompact()
     {
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
-        _marketStrip?.Stop(); _marketStrip = null;
+        if (_marketStrip is not null) { _marketElapsed = _marketStrip.Elapsed; _marketStrip.Stop(); _marketStrip = null; }
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
         if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
-        if (_alert is not null && !MarketCapsuleActive)
+        if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
             // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
@@ -429,7 +429,7 @@ public partial class MainWindow : Window
             return;
         }
         CompactAlert.Visibility = Visibility.Collapsed; CompactRings.Visibility = Visibility.Visible;
-        if (MarketCapsuleActive) RenderMarketStrip(); else RenderCompactMusic();
+        RenderCompactMusic();
         ApplyCollapsedLayout();
     }
 
@@ -706,7 +706,7 @@ public partial class MainWindow : Window
         if (inside)
         {
             _popupReturnArea = null;
-            _leave.Stop(); if (_expanded || IsSuppressed || MarketCapsuleActive) return;
+            _leave.Stop(); if (_expanded || IsSuppressed) return;
             _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else

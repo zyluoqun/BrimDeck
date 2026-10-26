@@ -39,12 +39,14 @@ public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
 // equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor }
+public enum CompactPart { Rings, Music, Monitor, Market }
 public static class CompactParts
 {
     public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+    public static IReadOnlyList<CompactPart> CapsuleDefault { get; } = [.. Default, CompactPart.Market];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
-    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order, bool capsule = false)
+        => [.. (order ?? []).Where(part => Enum.IsDefined(part) && (capsule || part != CompactPart.Market)).Concat(capsule ? CapsuleDefault : Default).Distinct()];
 }
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
@@ -193,7 +195,7 @@ public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
-    private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
+    private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.CapsuleDefault];
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -304,7 +306,7 @@ public sealed class DeckSettings
     public MarketRanking MarketRanking { get; set; }
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
-    public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
+    public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value, capsule: true); }
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;

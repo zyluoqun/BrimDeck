@@ -83,6 +83,9 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public double MonitorWidth { get; init; }
     public double MonitorFace { get; init; }
     public bool MonitorAlone { get; init; }
+    public double MarketWidth { get; init; }
+    public double MarketGap { get; init; }
+    public const double MarketSlot = 280;
     // Clock region: the gap, then the face; a lone clock has no gap and is centred.
     public double ClockWidth { get; init; }
     public double ClockFace { get; init; }
@@ -110,15 +113,16 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
     // (CollapsedGeometry.Resolve).
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace = 0)
     {
-        double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
+        double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), market = Safe(marketFace);
         rings = Math.Max(0, rings);
         double width = media ? Whole(20 * s) + Whole(8 * s) + Whole(8 * s) + Math.Max(1, Whole(18 * s)) : 0;
         width += RingsAndText(s, rings, text);
-        bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0;
+        bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0 && market == 0;
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
-        width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
+        width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 && market == 0 ? face : face + Whole(8 * s);
+        width += market + (market > 0 && (rings > 0 || text || monitor > 0) ? Whole(8 * s) : 0);
         return width;
     }
 
@@ -137,14 +141,27 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
     // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0)
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, double marketFace = 0)
+    {
+        double market = Safe(marketFace), width = Safe(contentWidth), s = SafeScale(scale);
+        if (market == 0) return CalculateCore(contentWidth, scale, media, rings, text, clockFace, monitorFace, companion: false);
+        bool otherContent = media || rings > 0 || text || Safe(clockFace) > 0 || Safe(monitorFace) > 0;
+        double natural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market);
+        double ratio = natural > 0 ? Math.Min(1, width / natural) : 0;
+        double region = otherContent ? market * ratio : width;
+        double gap = (rings > 0 || text || Safe(monitorFace) > 0) ? Whole(8 * s) * ratio : 0;
+        var original = CalculateCore(Math.Max(0, width - region - gap), s, media, rings, text, clockFace, monitorFace, companion: true);
+        return original with { ContentWidth = width, MarketWidth = region, MarketGap = gap };
+    }
+
+    private static CompactMusicLayout CalculateCore(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool companion)
     {
         double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
         double cover = Math.Max(1, Whole(20 * s)), coverGap = Whole(8 * s);
         double eqW = Math.Max(1, Whole(18 * s)), eqH = Math.Max(1, Whole(14 * s)), eqGap = Whole(8 * s), bar = Math.Max(1, Whole(3 * s));
         // Beside system readings the clock is not alone: it keeps its place at the right after them.
-        bool clockAlone = face > 0 && !media && rings == 0 && monitorWanted == 0;
+        bool clockAlone = face > 0 && !media && rings == 0 && monitorWanted == 0 && !companion;
         double coverRegion = media ? cover + coverGap : 0, eqRegion = media ? eqGap + eqW : 0;
         double clockRegion = face == 0 ? 0 : clockAlone ? face : face + Whole(8 * s);
         // The middle gives way first. When it is empty, the equalizer, then the cover, then the clock shrink in turn,
@@ -157,7 +174,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         // the two halves are even they narrow together. The readings scroll in what they keep, as the rings and the lyric do.
         // One ring and the shortest lyric always stay. Alone, the readings have the row. All are min and max of linear
         // functions of the width, with slopes from 0 to 1, as above.
-        bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0;
+        bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0 && !companion;
         double monitorNeed = monitorWanted + Whole(8 * s);
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
             : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),

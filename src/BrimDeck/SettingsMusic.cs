@@ -61,11 +61,10 @@ public sealed partial class SettingsWindow
         Group(rows, ClockRow(style, PartHandleWidth));
         if (style == CompactStyle.Capsule)
         {
-            Group(Toggle(Loc.T("显示币种行情", "Show coin market ticker"), S.CapsuleMarket, value => Change(s => s.CapsuleMarket = value)),
-                MusicChoice(Loc.T("显示榜单", "Market ranking"), S.MarketRanking,
+            Group(MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,
                     new[] { (MarketRanking.Hot, Loc.T("热门", "Hot")), (MarketRanking.Gainers, Loc.T("涨幅榜", "Gainers")), (MarketRanking.Losers, Loc.T("跌幅榜", "Losers")) },
                     value => Change(s => s.MarketRanking = value)),
-                TextLine(Loc.T("开启时胶囊常驻显示币种和24H涨跌幅，暂停悬停展开；点击币种打开图表，右键打开设置。关闭后恢复上方显示内容。", "When enabled, the capsule shows coin symbols and 24h changes without hover expansion. Click a coin for its chart; right-click for settings. Disable to restore the content above."), 11, TextSecondary));
+                TextLine(Loc.T("币种行情与其他已开启内容共同显示，可通过上方开关和拖动手柄控制显示、排序。点击币种打开图表，原有悬停展开功能保持不变。", "Market data appears alongside the other enabled content. Use its switch and drag handle above to show, hide or reorder it. Click a coin for its chart; hover expansion continues to work."), 11, TextSecondary));
         }
     }
 
@@ -79,6 +78,8 @@ public sealed partial class SettingsWindow
             CompactPart.Rings => (Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
                 Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧，律动条在右侧。", "Dragging moves only the title or lyric. The cover stays at the left and the equalizer at the right.")),
+            CompactPart.Market => (Loc.T("币种行情", "Coin market ticker"), S.CapsuleMarket,
+                Loc.T("显示币种名称和24H涨跌幅，与配额环、音乐、系统监控、时钟共同显示。", "Shows coin symbols and 24h changes alongside quotas, music, system readings and the clock.")),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -87,6 +88,7 @@ public sealed partial class SettingsWindow
             {
                 case CompactPart.Rings: if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; break;
                 case CompactPart.Music: if (notch) s.NotchMusic = on; else s.CapsuleMusic = on; break;
+                case CompactPart.Market: s.CapsuleMarket = on; break;
                 default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
             }
         });
