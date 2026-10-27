@@ -75,6 +75,18 @@ internal static class Program
         ((Grid)window.FindName("MarketContent")).Children.Add(view);
         view.Update(snapshot, MarketRanking.Hot, null); view.Measure(new Size(600, 230)); view.Arrange(new Rect(0, 0, 600, 230)); view.UpdateLayout();
         Check("Market page renders the entire ranking", view.RowCount == 30 && view.ListScroll.ScrollableHeight > 0);
+        foreach (double width in new[] { 440d, 620d, 1000d })
+        {
+            view.Measure(new Size(width, 230)); view.Arrange(new Rect(0, 0, width, 230)); view.UpdateLayout();
+            var first = (Button)((StackPanel)view.ListScroll.Content).Children[0];
+            var content = (Grid)first.Content;
+            double rowLeft = first.TransformToAncestor(view).Transform(new Point()).X;
+            double rankLeft = content.Children[0].TransformToAncestor(view).Transform(new Point()).X;
+            var percent = (TextBlock)content.Children[2];
+            double percentRight = percent.TransformToAncestor(view).Transform(new Point(percent.ActualWidth, 0)).X;
+            Check($"Market rows fill the {width} DIP viewport", first.ActualWidth >= view.ListScroll.ViewportWidth - 4 && rowLeft < 4);
+            Check($"Market columns use both edges at {width} DIPs", rankLeft < 20 && percentRight > rowLeft + first.ActualWidth - 20);
+        }
         view.ListScroll.ScrollToVerticalOffset(120); view.UpdateLayout(); double position = view.ListScroll.VerticalOffset;
         view.Update(snapshot, MarketRanking.Hot, null); view.UpdateLayout();
         Check("Quote refresh preserves the list scroll position", position > 0 && Math.Abs(view.ListScroll.VerticalOffset - position) < .01);

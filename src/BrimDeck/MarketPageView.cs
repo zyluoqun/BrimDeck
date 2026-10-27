@@ -35,7 +35,7 @@ internal sealed class MarketPageView : Grid
         toolbar.Children.Add(tabs); Children.Add(toolbar);
         _status.Margin = new Thickness(0, 0, 0, 8); SetRow(_status, 1); Children.Add(_status);
         ListScroll = new ScrollViewer { Content = _rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, CanContentScroll = false, Focusable = false };
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalContentAlignment = HorizontalAlignment.Stretch, CanContentScroll = false, Focusable = false };
         ListScroll.PreviewMouseWheel += (_, e) => { ListScroll.ScrollToVerticalOffset(ListScroll.VerticalOffset - e.Delta / 3d); e.Handled = true; };
         SetRow(ListScroll, 2); Children.Add(ListScroll); SetRow(_empty, 2); Children.Add(_empty);
     }
@@ -86,6 +86,7 @@ internal sealed class MarketPageView : Grid
         var change = new TextBlock { FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         SetColumn(change, 2); row.Children.Add(change);
         var button = TextButton(""); button.Content = row; button.HorizontalContentAlignment = HorizontalAlignment.Stretch; button.Height = 32; button.Margin = new Thickness(0, 0, 2, 2); button.ToolTip = coin.Symbol;
+        button.SetResourceReference(StyleProperty, "MarketRowButton");
         System.Windows.Automation.AutomationProperties.SetName(button, coin.Asset + Loc.T("，打开图表", ", open chart"));
         button.Click += (_, _) => { try { UI.OpenUrl(MarketCoin.ChartUrl(coin.Symbol, coin.Perpetual)); } catch (System.ComponentModel.Win32Exception) { button.ToolTip = Loc.T("无法打开浏览器", "Cannot open the browser"); } };
         _values.Add((coin, change)); _rows.Children.Add(button);

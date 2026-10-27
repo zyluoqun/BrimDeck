@@ -68,7 +68,6 @@ public sealed partial class SettingsWindow
         {
             Group(MarketRankingChoice(),
                 TextLine(Loc.T("币种行情与其他已开启内容共同显示，可通过上方开关和拖动手柄控制显示、排序。点击币种打开图表，原有悬停展开功能保持不变。", "Market data appears alongside the other enabled content. Use its switch and drag handle above to show, hide or reorder it. Click a coin for its chart; hover expansion continues to work."), 11, TextSecondary));
-            Group(ActionButton(Loc.T("适配已开启内容的宽度", "Fit width to enabled content"), () => Change(s => s.SetCompactAutoWidth(style, true))));
         }
     }
     private FrameworkElement MarketRankingChoice() => MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,

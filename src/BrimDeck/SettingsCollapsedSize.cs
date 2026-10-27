@@ -31,9 +31,12 @@ public sealed partial class SettingsWindow
 
     private void CollapsedSizeOptions(CompactStyle style)
     {
-        var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
-        AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
-        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint(style));
+        if (style != CompactStyle.Capsule)
+        {
+            var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
+            AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
+            SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint(style));
+        }
         switch (style)
         {
             case CompactStyle.Notch:
