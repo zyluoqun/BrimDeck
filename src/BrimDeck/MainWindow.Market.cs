@@ -24,6 +24,11 @@ public partial class MainWindow
     {
         if (MarketSummaryActive) _marketStrip?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
         _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
+        if (IsMarketPage)
+        {
+            double width = Math.Max(240, Math.Min(MarketPageView.PreferredWidth(_app.Market, Settings.MarketRanking), WorkDip.Width - 24));
+            if (Math.Abs(_pageWidth - width) > .5) { _pageWidth = width; SetExpanded(_expanded); }
+        }
         UpdateMarketIndicator();
     }
     private MarketTickerStrip CreateMarketStrip(double width, double rowHeight, double scale)

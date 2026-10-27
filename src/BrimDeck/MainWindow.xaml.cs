@@ -212,7 +212,8 @@ public partial class MainWindow : Window
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        _pageWidth = Fit(IsMarketPage ? MarketPageView.PreferredWidth(_app.Market, Settings.MarketRanking) : DeckPages.Size(Settings, CurrentPage).Width);
+        _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is

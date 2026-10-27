@@ -98,10 +98,15 @@ internal sealed class MarketTickerStrip : Grid
     }
     private void AddCoin(MarketCoin coin)
     {
-        var value = new Run();
+        var change = coin.CurrentChange(DateTimeOffset.UtcNow);
+        var value = new Run(change is { } percent ? percent.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) + "%" : "—");
         var text = new TextBlock { FontSize = 12 * _scale, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center,
             FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"), Foreground = UI.Brush(UI.Primary) };
         text.Inlines.Add(new Run(coin.Asset + "  ")); text.Inlines.Add(value);
+        // Reserve the percentage before measuring the animation cycle, including while quotes are unavailable.
+        var measure = new TextBlock { Text = coin.Asset + "  +0000.00%", FontSize = text.FontSize, FontWeight = text.FontWeight, FontFamily = text.FontFamily };
+        measure.Measure(new Size(double.PositiveInfinity, Height));
+        text.MinWidth = Math.Ceiling(measure.DesiredSize.Width);
         var template = new ControlTemplate(typeof(Button));
         var content = new FrameworkElementFactory(typeof(ContentPresenter)); template.VisualTree = content;
         var button = new Button { Content = text, Template = template, Background = Brushes.Transparent, BorderThickness = new Thickness(0),

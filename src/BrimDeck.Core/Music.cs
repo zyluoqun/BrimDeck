@@ -148,7 +148,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         bool otherContent = media || rings > 0 || text || Safe(clockFace) > 0 || Safe(monitorFace) > 0;
         double natural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market);
         double ratio = natural > 0 ? Math.Min(1, width / natural) : 0;
-        double region = otherContent ? market * ratio : width;
+        // Original modules keep their natural slots; manual widening belongs to the scrolling market list.
+        double region = otherContent ? market * ratio + Math.Max(0, width - natural) : width;
         double gap = (rings > 0 || text || Safe(monitorFace) > 0) ? Whole(8 * s) * ratio : 0;
         var original = CalculateCore(Math.Max(0, width - region - gap), s, media, rings, text, clockFace, monitorFace, companion: true);
         return original with { ContentWidth = width, MarketWidth = region, MarketGap = gap };

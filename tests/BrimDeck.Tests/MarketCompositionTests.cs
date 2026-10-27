@@ -32,6 +32,9 @@ internal static class MarketCompositionTests
             && !monitorMarket.MonitorAlone && monitorMarket.MonitorWidth >= 150);
         var only = CompactMusicLayout.Calculate(400, 1, false, 0, false, 0, 0, 280);
         check("Market alone can use the whole capsule width", only.MarketWidth == 400 && only.MarketGap == 0);
+        var wider = CompactMusicLayout.Calculate(natural + 400, 1, true, 3, true, 40, 150, 280);
+        check("Widening a mixed row gives the additional space to market coins", wider.MarketWidth >= all.MarketWidth + 399
+            && wider.TextWidth == all.TextWidth && wider.MonitorWidth == all.MonitorWidth);
         foreach (double scale in new[] { .5, 1d, 2d })
         foreach (int width in new[] { 0, 1, 40, 100, 180, 320, 720, 1200 })
         {

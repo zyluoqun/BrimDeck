@@ -19,12 +19,27 @@ internal sealed class MarketPageView : Grid
     internal ScrollViewer ListScroll { get; }
     internal int RowCount => _values.Count;
     internal MarketRanking Ranking { get; private set; }
+    internal static double PreferredWidth(MarketFeedSnapshot snapshot, MarketRanking ranking)
+    {
+        static double TextWidth(string text, double size = 12)
+        {
+            var label = new TextBlock { Text = text, FontSize = size };
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); return label.DesiredSize.Width;
+        }
+        double toolbar = Enum.GetValues<MarketRanking>().Sum(value => Math.Max(64, TextWidth(Label(value)) + 20) + 8)
+            + Math.Max(64, TextWidth(Loc.T("导入配置", "Import feed")) + 20);
+        double symbol = snapshot.Rows(ranking).Select(coin => TextWidth(coin.Asset + (coin.Perpetual ? Loc.T("  合约", "  perpetual") : Loc.T("  现货", "  spot"))))
+            .DefaultIfEmpty(80).Max();
+        // Outer margins, row padding, rank, percent and scrollbar; timestamps wrap instead of widening the panel.
+        return Math.Clamp(Math.Ceiling(Math.Max(toolbar + 28, symbol + 30 + 90 + 20 + 19 + 28)), 360, DeckPages.MaxWidth);
+    }
     public MarketPageView(Action<MarketRanking> select, Action import)
     {
         _select = select;
         RowDefinitions.Add(new() { Height = GridLength.Auto }); RowDefinitions.Add(new() { Height = GridLength.Auto }); RowDefinitions.Add(new());
         var toolbar = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var configure = TextButton(Loc.T("导入行情配置", "Import feed configuration"));
+        var configure = TextButton(Loc.T("导入配置", "Import feed"));
+        configure.ToolTip = Loc.T("导入行情配置", "Import feed configuration");
         configure.Click += (_, _) => import(); DockPanel.SetDock(configure, Dock.Right); toolbar.Children.Add(configure);
         var tabs = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var ranking in Enum.GetValues<MarketRanking>())
