@@ -31,7 +31,7 @@ public partial class App
             MarketError = Market.Error;
         }
         catch (OperationCanceledException) { if (!Exiting) { Market = MarketFeedSnapshot.Empty; MarketError = Loc.T("行情连接超时", "Market connection timed out"); } }
-        catch (Exception ex) when (ex is IOException or HttpRequestException or System.Text.Json.JsonException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or HttpRequestException or System.Text.Json.JsonException or ArgumentException or InvalidOperationException)
         { Market = MarketFeedSnapshot.Empty; MarketError = ex is HttpRequestException ? Loc.T("行情服务暂不可用，请检查网络或只读授权", "Market service unavailable; check the network or read-only credential") : ex.Message; }
         finally { _marketBusy = false; if (!Exiting) MarketUpdated?.Invoke(); }
     }

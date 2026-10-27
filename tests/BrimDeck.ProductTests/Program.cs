@@ -55,6 +55,13 @@ internal static class Program
                 Check("Original music progress indicator remains available", line.FindName("MusicIndicator") is Border);
             }
             finally { typeof(MainWindow).GetField("_retiring", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(line, true); line.Close(); }
+            if (!System.IO.File.Exists(System.IO.Path.Combine(AppContext.BaseDirectory, "market-feed.json")))
+            {
+                app.RefreshMarketAsync().GetAwaiter().GetResult();
+                Check("Missing feed configuration becomes an explicit UI error instead of an unhandled loading state", app.MarketError?.Contains("market-feed.json") == true);
+                app.RefreshMarketAsync().GetAwaiter().GetResult();
+                Check("A failed configuration read releases the refresh gate for recovery", app.MarketError?.Contains("market-feed.json") == true);
+            }
             Console.WriteLine($"{_checks} product UI checks passed."); return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
