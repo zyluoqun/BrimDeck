@@ -26,6 +26,14 @@ internal static class CandleCountdownUiTests
         check("The last ten seconds are highlighted in red", value.Foreground is SolidColorBrush { Color: var red } && red == (Color)ColorConverter.ConvertFromString("#FB7185"));
         strip.Update(boundary.AddSeconds(-10), true, false);
         check("Disabling close highlights restores theme text color", value.Foreground is SolidColorBrush { Color: var normal } && normal == ((SolidColorBrush)UI.Brush(UI.Primary)).Color);
+        var inherited = new CandleCountdownStrip(CandlePeriods.All);
+        var inheritedBox = new Viewbox { Child = inherited, Width = inherited.ReservedWidth, Height = 24, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly };
+        System.Windows.Documents.TextElement.SetFontFamily(inheritedBox, new FontFamily("Global Monospace"));
+        foreach (var pair in inherited.Children.OfType<StackPanel>()) ((TextBlock)pair.Children[0]).FontSize = 20;
+        inheritedBox.UseLayoutRounding = true;
+        inheritedBox.Measure(new Size(inheritedBox.Width, 24)); inheritedBox.Arrange(new Rect(0, 0, inheritedBox.Width, 24)); inheritedBox.UpdateLayout();
+        double inheritedEnd = inherited.TransformToAncestor(inheritedBox).Transform(new Point(inherited.ActualWidth, 0)).X;
+        check($"Countdown still fits when its font metrics change after construction ({inheritedEnd:0.###} <= {inheritedBox.Width:0.###})", inheritedEnd <= inheritedBox.Width + 1);
 
         foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule })
         {

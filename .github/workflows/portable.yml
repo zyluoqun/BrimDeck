@@ -20,16 +20,24 @@ jobs:
       - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - name: Build and test
+      - name: Chrome chart tests
         run: |
           node --test tests/chrome-chart/chart-window.test.mjs tests/chrome-chart/window-marker.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Chrome chart tests failed.' }
+      - name: Build
+        run: |
           dotnet build BrimDeck.sln -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+      - name: Product UI tests
+        run: |
           dotnet run --project tests/BrimDeck.ProductTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Product UI tests failed.' }
+      - name: Core tests
+        run: |
           dotnet run --project tests/BrimDeck.Tests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+      - name: Media tests
+        run: |
           dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
       - name: Publish self-contained portable folder

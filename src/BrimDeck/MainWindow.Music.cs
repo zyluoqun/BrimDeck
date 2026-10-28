@@ -1040,9 +1040,7 @@ public partial class MainWindow
                 case "clock":
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case "countdown":
-                    double countdownWidth = Math.Min(countdown!.ReservedWidth, SnapDown(room, dpi));
-                    var countdownFace = new Viewbox { Child = countdown, Width = countdownWidth, Height = row, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly };
-                    element = CompactRegion(countdownFace, room, countdownWidth, row, row, RegionAnchor.Left, dpi); break;
+                    element = new Viewbox { Child = countdown, Width = room, Height = row, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly }; break;
                 case CompactPart.Market:
                     element = CreateMarketStrip(room, row, scale);
                     double origin = shape.Surface.X + (shape.Surface.Width - grid.Width) / 2;

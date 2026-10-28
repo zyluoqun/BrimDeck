@@ -31,7 +31,8 @@ internal sealed class CandleCountdownStrip : StackPanel
             value.Measure(new Size(double.PositiveInfinity, Height)); value.Width = Math.Ceiling(value.DesiredSize.Width);
             pair.Children.Add(value); Children.Add(pair); _values.Add((period, value));
         }
-        Measure(new Size(double.PositiveInfinity, Height)); ReservedWidth = Math.Ceiling(DesiredSize.Width); Width = ReservedWidth;
+        // The host's font and layout rounding can change the natural width after attachment; a Viewbox must measure it again.
+        Measure(new Size(double.PositiveInfinity, Height)); ReservedWidth = Math.Ceiling(DesiredSize.Width);
         AutomationProperties.SetName(this, Loc.T("K 线收盘倒计时", "Candle close countdown"));
     }
     internal void Update(DateTimeOffset now, bool synchronized, bool highlight)
