@@ -39,9 +39,19 @@ internal static class CandleCountdownUiTests
             typeof(BrimDeck.App).GetProperty(nameof(BrimDeck.App.Deck))!.SetValue(app, window);
             try
             {
-                foreach (double surface in new[] { 320d, 640d, 1100d })
+                var originalDpi = VisualTreeHelper.GetDpi(window);
+                foreach (double monitorWidth in new[] { 0d, 1024d, 1920d })
+                foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
+                foreach (double surface in new[] { 320d, 640d, 1000d, 1024d, 1100d })
                 {
-                    s.NotchWidth = s.CapsuleWidth = surface; window.ApplySettings(); window.RenderCompact();
+                    s.NotchWidth = s.CapsuleWidth = surface; window.ApplySettings();
+                    if (monitorWidth > 0)
+                    {
+                        var monitor = new DipRect(0, 0, monitorWidth, 768);
+                        var shape = CollapsedGeometry.Resolve(s, style, monitor, monitor, dpi);
+                        typeof(MainWindow).GetProperty(nameof(MainWindow.Collapsed), BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, shape);
+                    }
+                    VisualTreeHelper.SetRootDpi(window, new DpiScale(dpi, dpi)); window.RenderCompact();
                     var compact = (Grid)window.FindName("Compact");
                     compact.Measure(new Size(compact.Width, compact.Height)); compact.Arrange(new Rect(0, 0, compact.Width, compact.Height)); compact.UpdateLayout();
                     var countdown = (CandleCountdownStrip)typeof(MainWindow).GetField("_compactCountdown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
@@ -49,12 +59,13 @@ internal static class CandleCountdownUiTests
                     var end = countdown.TransformToAncestor(compact).Transform(new Point(countdown.ActualWidth, 0)).X;
                     var start = countdown.TransformToAncestor(compact).Transform(new Point()).X;
                     var tickerEnd = ticker.TransformToAncestor(compact).Transform(new Point(ticker.ActualWidth, 0)).X;
-                    check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs", countdown.Values.Count == 3
+                    check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs / {dpi} DPI / {monitorWidth} monitor (ticker end {tickerEnd:0.###}, countdown {start:0.###}..{end:0.###}, row {compact.Width:0.###})", countdown.Values.Count == 3
                         && start >= tickerEnd - 1 && end <= compact.Width + 1 && end > start);
                     check($"{style}: monitoring still has room beside countdowns at {surface} DIPs", window.CurrentCompactLayout!.MonitorWidth > 0);
                     check($"{style}: upstream whole-reading layout keeps an actual monitor beside the custom modules at {surface} DIPs",
                         typeof(MainWindow).GetField("_compactStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is MonitorStrip { ActualWidth: > 0 });
                 }
+                VisualTreeHelper.SetRootDpi(window, originalDpi);
                 s.NotchClock = s.CapsuleClock = true; window.RenderCompact();
                 check($"{style}: clock and countdown coexist", typeof(MainWindow).GetField("_compactClock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is ClockFace);
                 var timeRow = (Grid)window.FindName("Compact");
