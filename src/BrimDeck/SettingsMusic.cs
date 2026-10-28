@@ -63,11 +63,11 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel();
         foreach (var part in S.CompactOrder(style)) rows.Children.Add(PartRow(style, part, rows));
         UpdateDividers(rows);
-        Group(rows, ClockRow(style, PartHandleWidth));
+        Group(rows, ClockRow(style, PartHandleWidth), CandleCountdownRow(style));
         if (style != CompactStyle.Line)
         {
             Group(MarketRankingChoice(),
-                TextLine(Loc.T("币种行情与其他已开启内容共同显示，可通过上方开关和拖动手柄控制显示、排序。点击币种打开图表，原有悬停展开功能保持不变。", "Market data appears alongside the other enabled content. Use its switch and drag handle above to show, hide or reorder it. Click a coin for its chart; hover expansion continues to work."), 11, TextSecondary));
+                TextLine(Loc.T("行情区域悬停暂停滚动，不展开面板。点击币种依次切换网页下方三屏，默认 4h；其他区域保持悬停展开。", "Hovering market data pauses scrolling without expanding. Click a coin to rotate through the three lower browser charts at 4h; other areas retain hover expansion."), 11, TextSecondary));
         }
     }
     private FrameworkElement MarketRankingChoice() => MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,

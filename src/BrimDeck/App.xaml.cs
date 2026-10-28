@@ -94,6 +94,7 @@ public partial class App : Application
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
         StartMarketFeed();
+        StartCandleCountdown();
         InitializeHotkeys();
         StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
@@ -170,6 +171,7 @@ public partial class App : Application
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
+        UpdateCandleCountdownSettings();
         ApplyHotkeys();
         _ = RefreshMarketAsync();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
@@ -308,7 +310,8 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        _marketTimer.Stop(); _marketHttp.Dispose();
+        _marketTimer.Stop(); _marketHttp.Dispose(); _chartHttp.Dispose(); _chromeCharts?.Dispose();
+        StopCandleCountdown();
         Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

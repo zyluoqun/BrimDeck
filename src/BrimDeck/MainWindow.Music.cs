@@ -852,23 +852,32 @@ public partial class MainWindow
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         // The clock keeps its own width at the right; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
+        var countdown = CreateCandleCountdown(scale);
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null && marketFace == 0, _stripPresence, dpi) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null && marketFace == 0 && countdown is null, _stripPresence, dpi) : null;
         // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace); CurrentCompactLayout = layout;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight;
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.EqualizerWidth, dpi)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ClockAlone ? 0 : SnapDown(layout.ClockWidth, dpi)) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CountdownWidth + layout.CountdownGap, dpi)) });
+        if (countdown is not null && layout.CountdownWidth > 0)
+        {
+            double faceWidth = Math.Min(countdown.ReservedWidth, SnapDown(layout.CountdownWidth, dpi));
+            var face = new Viewbox { Child = countdown, Width = faceWidth, Height = row, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly };
+            var region = CompactRegion(face, layout.CountdownWidth + layout.CountdownGap, faceWidth, row, row, layout.CountdownAlone ? RegionAnchor.Center : RegionAnchor.Right, dpi);
+            Grid.SetColumn(region, 4); grid.Children.Add(region);
+        }
         // The readings in a region of the given width; wider than it, they scroll in a carousel whose left fade lies over the gap before it.
         FrameworkElement Readings(MonitorStrip readings, double span)
         {
@@ -904,7 +913,7 @@ public partial class MainWindow
             Grid.SetColumn(region, 2); grid.Children.Add(region);
         }
         var middle = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(middle, 1); grid.Children.Add(middle);
-        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value);
+        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value - grid.ColumnDefinitions[4].Width.Value);
         // The rings, the lyric and the readings in the order chosen for this style. The readings' gap lies on the side of their
         // neighbour (after them only when they come first and something follows); the space between the rings and the lyric lies
         // before whichever of the two comes second. Positions are snapped cumulatively from the middle's left edge and kept inside
@@ -913,6 +922,7 @@ public partial class MainWindow
         var parts = Settings.CompactOrder(EffectiveStyle).Where(part => part switch { CompactPart.Rings => hasRings, CompactPart.Music => hasText, CompactPart.Market => layout.MarketWidth > 0, _ => hasReadings }).ToList();
         var originalParts = parts.Where(part => part != CompactPart.Market).ToList();
         double readingsGap = CompactMusicLayout.Whole(8 * scale), cursor = 0, placed = 0;
+        double marketStart = 0, marketEnd = 0;
         for (int i = 0; i < parts.Count; i++)
         {
             var part = parts[i];
@@ -926,6 +936,7 @@ public partial class MainWindow
             }
             double width = part switch { CompactPart.Rings => layout.RingWidth, CompactPart.Music => layout.TextWidth, CompactPart.Market => layout.MarketWidth, _ => Math.Max(0, layout.MonitorWidth - readingsGap) };
             double start = Math.Min(middleColumn, SnapDown(cursor + gap, dpi)), end = Math.Min(middleColumn, SnapDown(cursor + gap + width, dpi));
+            if (part == CompactPart.Market) { marketStart = start; marketEnd = end; }
             cursor += gap + width;
             FrameworkElement element = part switch
             {
@@ -941,6 +952,16 @@ public partial class MainWindow
             element.Margin = new Thickness(left + start - placed, 0, end - start - (element.Width + left), 0);
             element.VerticalAlignment = VerticalAlignment.Center; element.HorizontalAlignment = HorizontalAlignment.Left;
             middle.Children.Add(element); placed = end;
+        }
+        if (marketEnd > marketStart)
+        {
+            // Keep hit testing independent of a ticker's initial/retiring visual, including while WPF remeasures the row.
+            double origin = shape.Surface.X + (shape.Surface.Width - grid.Width) / 2 + grid.ColumnDefinitions[0].Width.Value + Math.Max(0, (middleColumn - placed) / 2);
+            double left = origin + marketStart, right = origin + marketEnd;
+            if (parts[0] == CompactPart.Market && layout.CoverWidth == 0) left = shape.Surface.X;
+            if (parts[^1] == CompactPart.Market && layout.EqualizerWidth == 0 && layout.ClockWidth == 0 && layout.CountdownWidth == 0) right = shape.Surface.Right;
+            var zone = CollapsedHover.Zone(shape.Style, shape.Surface, WorkDip.Y);
+            CompactMarketHoverArea = new Rect(left, zone.Y, Math.Max(0, right - left), zone.Height);
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
         // The readings were built with the row; they start or stop the sampler and take the newest reading.

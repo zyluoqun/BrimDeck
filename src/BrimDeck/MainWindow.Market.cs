@@ -14,16 +14,30 @@ public partial class MainWindow
     private bool IsMarketPage => CurrentPage == DeckPage.Market;
     private bool MarketSummaryActive => EffectiveStyle != CompactStyle.Line && Settings.ShowsMarket(EffectiveStyle);
     internal bool MarketDemand => IsVisible && !IsSuppressed && (_expanded ? IsMarketPage : Settings.ShowsMarket(EffectiveStyle));
-    private bool MarketHoverTarget => Settings.ShowsMarket(EffectiveStyle) && (EffectiveStyle == CompactStyle.Line || _marketStrip?.IsMouseOver == true);
+    private bool MarketHoverTarget => Settings.ShowsMarket(EffectiveStyle) && EffectiveStyle == CompactStyle.Line;
+    internal Rect CompactMarketHoverArea { get; private set; } = Rect.Empty;
+    internal bool IsMarketHoverPoint(Point point) => !_expanded && _alert is null && MarketSummaryActive && CompactMarketHoverArea.Contains(point);
+    private bool MarketBlocksHover(Point cursor)
+    {
+        if (PresentationSource.FromVisual(Stage) is null) return false;
+        var point = Stage.PointFromScreen(cursor);
+        return IsMarketHoverPoint(new Point(point.X + _windowOffset, point.Y));
+    }
     private void InitializeMarket()
     {
         _app.MarketUpdated += UpdateMarketStrip;
-        Closed += (_, _) => { _app.MarketUpdated -= UpdateMarketStrip; _marketStrip?.Stop(); };
+        _app.MarketChartActivityChanged += UpdateMarketActivity;
+        Closed += (_, _) => { _app.MarketUpdated -= UpdateMarketStrip; _app.MarketChartActivityChanged -= UpdateMarketActivity; _marketStrip?.Stop(); };
+    }
+    private void UpdateMarketActivity()
+    {
+        _marketStrip?.SetPending(_app.PendingChartCoins);
+        _marketPageView?.SetPending(_app.PendingChartCoins);
     }
     private void UpdateMarketStrip()
     {
         if (MarketSummaryActive) _marketStrip?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
-        _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
+        _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus);
         if (IsMarketPage)
         {
             double width = Math.Max(240, Math.Min(MarketPageView.PreferredWidth(_app.Market, Settings.MarketRanking), WorkDip.Width - 24));
@@ -36,11 +50,13 @@ public partial class MainWindow
         if (_marketRankingRendered != Settings.MarketRanking) _marketElapsed = TimeSpan.Zero;
         _marketRankingRendered = Settings.MarketRanking;
         _marketStrip = new MarketTickerStrip(width, rowHeight, scale,
-            Settings.Animations && SystemParameters.ClientAreaAnimation, _marketElapsed);
+            Settings.Animations && SystemParameters.ClientAreaAnimation, _marketElapsed, _app.SwitchMarketChartAsync);
+        _marketStrip.MouseEnter += (_, _) => { if (!_expanded && !_preview) TrackCompactHover(true, true); };
         var menu = new ContextMenu();
         var settings = new MenuItem { Header = Loc.T("设置", "Settings") };
         settings.Click += (_, _) => _app.OpenSettings(); menu.Items.Add(settings); _marketStrip.ContextMenu = menu;
         _marketStrip.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
+        _marketStrip.SetPending(_app.PendingChartCoins);
         return _marketStrip;
     }
     private void MarketPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Market);
@@ -57,10 +73,12 @@ public partial class MainWindow
             {
                 Settings.MarketRanking = ranking; _app.QueueSave();
                 foreach (var deck in _app.Decks) { deck.RenderCompact(); deck.UpdateMarketStrip(); }
-            }, ImportMarketConfiguration);
+            }, ImportMarketConfiguration, _app.SwitchMarketChartAsync);
             MarketContent.Children.Add(_marketPageView);
+            _marketPageView.SetPending(_app.PendingChartCoins);
         }
-        _marketPageView.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
+        _marketPageView.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus);
+        _marketPageView.UpdateCountdown(Settings, _app.CandleClock.UtcNow, _app.CandleClock.IsSynchronized);
     }
     private async void ImportMarketConfiguration()
     {

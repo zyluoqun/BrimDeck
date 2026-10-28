@@ -18,6 +18,7 @@ public sealed record MarketCoin(string Asset, string Symbol, bool Perpetual, dou
 public sealed record MarketFeedSnapshot(long? SnapshotAt, IReadOnlyList<MarketCoin> Hot, IReadOnlyList<MarketCoin> Gainers,
     IReadOnlyList<MarketCoin> Losers, string? Error, string? HotError)
 {
+    public long? ServerTime { get; init; }
     public static MarketFeedSnapshot Empty { get; } = new(null, [], [], [], null, null);
     public IReadOnlyList<MarketCoin> Rows(MarketRanking ranking) => ranking switch { MarketRanking.Gainers => Gainers, MarketRanking.Losers => Losers, _ => Hot };
     public static MarketFeedSnapshot Parse(string json)
@@ -44,7 +45,8 @@ public sealed record MarketFeedSnapshot(long? SnapshotAt, IReadOnlyList<MarketCo
             return rows;
         }
         long? at = root.TryGetProperty("snapshotAt", out var timestamp) && timestamp.ValueKind == JsonValueKind.Number && timestamp.TryGetInt64(out var ms) ? ms : null;
-        return new(at, Read("hot"), Read("gainers"), Read("losers"), Message("error"), Message("hotError"));
+        long? serverTime = root.TryGetProperty("at", out var generated) && generated.ValueKind == JsonValueKind.Number && generated.TryGetInt64(out var serverMs) ? serverMs : null;
+        return new(at, Read("hot"), Read("gainers"), Read("losers"), Message("error"), Message("hotError")) { ServerTime = serverTime };
     }
 }
 public sealed record MarketFeedConfiguration(string Endpoint, string Token, bool AllowPrivateHttp = false)
@@ -86,6 +88,8 @@ public sealed class MarketFeedClient(HttpClient http, MarketFeedConfiguration co
             if (buffer.Length + read > 1_000_000) throw new InvalidDataException("Market response too large.");
             buffer.Write(chunk, 0, read);
         }
-        return MarketFeedSnapshot.Parse(System.Text.Encoding.UTF8.GetString(buffer.ToArray()));
+        var snapshot = MarketFeedSnapshot.Parse(System.Text.Encoding.UTF8.GetString(buffer.ToArray()));
+        // Ranking snapshots may be hours old; only the response generation time can calibrate a clock.
+        return snapshot with { ServerTime = response.Headers.Age is { } age && age > TimeSpan.Zero ? null : snapshot.ServerTime ?? response.Headers.Date?.ToUnixTimeMilliseconds() };
     }
 }

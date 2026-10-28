@@ -97,7 +97,7 @@ public partial class MainWindow : Window
         _hover = new(Dispatcher, () =>
         {
             _hover!.Stop();
-            if (IsSuppressed || !_pointerInside) return;
+            if (IsSuppressed || !_pointerInside || MarketBlocksHover(WindowsHost.Cursor())) return;
             // Opened by hovering: the panel centres on the pointer (see SetExpanded).
             if (PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
             SetExpanded(true);
@@ -118,6 +118,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeMarket();
+        InitializeCandleCountdown();
         InitializeResize();
         InitializeShadow();
         Island.Background = _surface;
@@ -416,12 +417,14 @@ public partial class MainWindow : Window
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
     internal void RenderCompact()
     {
+        CompactMarketHoverArea = Rect.Empty;
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         if (_marketStrip is not null) { _marketElapsed = _marketStrip.Elapsed; _marketStrip.Stop(); _marketStrip = null; }
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
         if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
+        _compactCountdown = null;
         if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
@@ -699,6 +702,11 @@ public partial class MainWindow : Window
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
             return;
         }
+        TrackCompactHover(inCompact, MarketBlocksHover(cursor));
+    }
+    internal void TrackCompactHover(bool inCompact, bool overMarket)
+    {
+        inCompact &= !overMarket;
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
         else if (!inCompact && _pointerInside) PointerChanged(false);
     }
@@ -712,7 +720,8 @@ public partial class MainWindow : Window
         {
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
-            _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
+            // Let a pointer travelling across an adjacent module reach the clickable ticker before expanding.
+            _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(MarketSummaryActive ? TrackNear * 2 : 1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {

@@ -243,6 +243,14 @@ public sealed class DeckSettings
     public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
+    public bool NotchCandleCountdown { get; set; } = true;
+    public bool CapsuleCandleCountdown { get; set; } = true;
+    public CandlePeriods CandleCountdownPeriods { get; set; } = CandlePeriods.All;
+    public bool CandleCountdownHighlight { get; set; } = true;
+    public bool CandleCountdownSound { get; set; }
+    public bool CandleCountdownNotification { get; set; }
+    public bool CandleCountdownChart { get; set; } = true;
+    [JsonIgnore] public bool CandleCountdownWanted => (NotchCandleCountdown || CapsuleCandleCountdown) && (CandleCountdownPeriods & CandlePeriods.All) != CandlePeriods.None;
     public CompactMusicText MusicText { get; set; }
     public bool MusicCoverColor { get; set; } = true;
     public bool MusicTrackNotice { get; set; } = true;
@@ -309,6 +317,7 @@ public sealed class DeckSettings
     public double MarketWidth { get; set; } = 620;
     public double MarketHeight { get; set; } = 320;
     public MarketRanking MarketRanking { get; set; }
+    public List<int> MarketChartPinnedPanes { get; set; } = [];
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value, capsule: true); }
@@ -352,6 +361,8 @@ public sealed class DeckSettings
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
     // The indicator is too thin for text, so it never shows the clock.
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
+    public bool ShowsCandleCountdown(CompactStyle style) => CandleCountdownPeriods != CandlePeriods.None && style switch
+    { CompactStyle.Notch => NotchCandleCountdown, CompactStyle.Capsule => CapsuleCandleCountdown, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsMarket(CompactStyle style) => style switch { CompactStyle.Notch => NotchMarket, CompactStyle.Capsule => CapsuleMarket, _ => LineMarket };
@@ -423,6 +434,7 @@ public sealed class DeckSettings
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
+        copy.MarketChartPinnedPanes = [.. MarketChartPinnedPanes ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
@@ -474,7 +486,9 @@ public sealed class DeckSettings
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(MarketRanking)) MarketRanking = MarketRanking.Hot;
+        MarketChartPinnedPanes = (MarketChartPinnedPanes ?? []).Where(pane => pane is >= 1 and <= 3).Distinct().Take(2).ToList();
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
+        CandleCountdownPeriods &= CandlePeriods.All;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
         ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
         var stops = (ClockGradient ?? []).Select(AppPresets.NormalizeColor).ToList();

@@ -85,6 +85,9 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public bool MonitorAlone { get; init; }
     public double MarketWidth { get; init; }
     public double MarketGap { get; init; }
+    public double CountdownWidth { get; init; }
+    public double CountdownGap { get; init; }
+    public bool CountdownAlone { get; init; }
     public const double MarketSlot = 280;
     // Clock region: the gap, then the face; a lone clock has no gap and is centred.
     public double ClockWidth { get; init; }
@@ -113,7 +116,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
     // (CollapsedGeometry.Resolve).
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace = 0)
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace = 0, double countdownFace = 0)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), market = Safe(marketFace);
         rings = Math.Max(0, rings);
@@ -123,7 +126,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
         width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 && market == 0 ? face : face + Whole(8 * s);
         width += market + (market > 0 && (rings > 0 || text || monitor > 0) ? Whole(8 * s) : 0);
-        return width;
+        return width + Safe(countdownFace) + (Safe(countdownFace) > 0 && width > 0 ? Whole(8 * s) : 0);
     }
 
     // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
@@ -141,9 +144,19 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
     // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, double marketFace = 0)
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, double marketFace = 0, double countdownFace = 0)
     {
         double market = Safe(marketFace), width = Safe(contentWidth), s = SafeScale(scale);
+        if (Safe(countdownFace) > 0)
+        {
+            double originalWidth = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market);
+            double countdownNatural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, countdownFace);
+            // Countdown digits shrink together in a fixed slot; narrow manual sizes still leave room for the original modules.
+            double face = originalWidth > 0 ? Safe(countdownFace) * Math.Min(1, width / countdownNatural) : width;
+            double countdownGap = originalWidth > 0 ? Math.Min(Whole(8 * s) * Math.Min(1, width / countdownNatural), Math.Max(0, width - face)) : 0;
+            var baseline = Calculate(Math.Max(0, width - face - countdownGap), s, media, rings, text, clockFace, monitorFace, market);
+            return baseline with { ContentWidth = width, CountdownWidth = face, CountdownGap = countdownGap, CountdownAlone = originalWidth == 0 };
+        }
         if (market == 0) return CalculateCore(contentWidth, scale, media, rings, text, clockFace, monitorFace, companion: false);
         bool otherContent = media || rings > 0 || text || Safe(clockFace) > 0 || Safe(monitorFace) > 0;
         double natural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market);

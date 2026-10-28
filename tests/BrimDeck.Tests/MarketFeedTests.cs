@@ -10,6 +10,7 @@ internal static class MarketFeedTests
              "losers":[{"asset":"DOWN","symbol":"DOWNUSDT","perpetual":true,"change24h":null}],"error":null,"hotError":null}
             """;
         var snapshot = MarketFeedSnapshot.Parse(json);
+        check("Countdown calibration uses current response time instead of ranking snapshot time", snapshot.ServerTime == 2000 && snapshot.SnapshotAt == 1000);
         check("Market feed preserves actual contract symbols and selected ranking", snapshot.Rows(MarketRanking.Hot).Single().Symbol == "1000PEPEUSDT" && snapshot.Rows(MarketRanking.Gainers).Single().Asset == "UP");
         check("Missing market changes stay missing", snapshot.Rows(MarketRanking.Losers).Single().Change24h is null);
         check("Market links preserve spot and futures identity", MarketCoin.ChartUrl("1000PEPEUSDT", true).Contains("BINANCE_FUTURES%3A1000PEPEUSDT") && MarketCoin.ChartUrl("OSMOUSDT", false).Contains("BINANCE%3AOSMOUSDT"));
@@ -23,6 +24,12 @@ internal static class MarketFeedTests
         var client = new MarketFeedClient(http, new("https://example.com/api/companion/market", "read-key"));
         await client.ReadAsync(CancellationToken.None);
         check("Market client uses scoped bearer authorization", handler.Authorization == "Bearer read-key");
+        handler.Age = TimeSpan.FromMinutes(1);
+        check("Cached responses cannot recalibrate the countdown", (await client.ReadAsync(CancellationToken.None)).ServerTime is null);
+        handler.Age = null; handler.Json = json.Replace("\"at\":2000,", "");
+        check("Ranking timestamps never serve as a countdown clock", (await client.ReadAsync(CancellationToken.None)).ServerTime is null);
+        handler.Date = DateTimeOffset.FromUnixTimeMilliseconds(3000);
+        check("An HTTP response date can calibrate feeds without generation time", (await client.ReadAsync(CancellationToken.None)).ServerTime == 3000);
         check("Market client refuses plaintext transport", !MarketFeedConfiguration.ValidEndpoint("http://example.com/api/companion/market"));
         check("LAN HTTP requires explicit opt-in and a private IP", !MarketFeedConfiguration.ValidEndpoint("http://192.168.0.211:5089/api/companion/market")
             && MarketFeedConfiguration.ValidEndpoint("http://192.168.0.211:5089/api/companion/market", true)
@@ -33,11 +40,16 @@ internal static class MarketFeedTests
     }
     private sealed class MarketHandler(string json) : HttpMessageHandler
     {
+        public string Json = json;
+        public TimeSpan? Age;
+        public DateTimeOffset? Date;
         public string? Authorization;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Authorization = request.Headers.Authorization?.ToString();
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(Json) };
+            response.Headers.Age = Age; response.Headers.Date = Date;
+            return Task.FromResult(response);
         }
     }
 }

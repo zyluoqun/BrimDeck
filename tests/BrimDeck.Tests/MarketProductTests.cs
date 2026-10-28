@@ -32,5 +32,15 @@ internal static class MarketProductTests
             && restored.NotchOrder.SequenceEqual(settings.NotchOrder) && restored.MarketWidth == 700 && restored.MarketHeight == 350);
         settings.MarketWidth = double.NaN; settings.MarketHeight = double.PositiveInfinity; settings.Normalize();
         check("Market dimensions normalize without corrupting original settings", double.IsFinite(settings.MarketWidth) && double.IsFinite(settings.MarketHeight));
+        check("Existing settings start with all three chart panes available", new DeckSettings().MarketChartPinnedPanes.Count == 0);
+        settings.MarketChartPinnedPanes = [1, 3];
+        restored = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
+        check("Pinned chart panes survive settings reload", restored.MarketChartPinnedPanes.SequenceEqual([1, 3]));
+        var copy = settings.Copy(); copy.MarketChartPinnedPanes.Remove(1);
+        check("Editing a settings copy cannot change the saved chart pins", settings.MarketChartPinnedPanes.SequenceEqual([1, 3]));
+        settings.MarketChartPinnedPanes = [0, 3, 3, 4, 2, 1]; settings.Normalize();
+        check("Invalid and duplicate pins normalize to at most two lower chart panes", settings.MarketChartPinnedPanes.SequenceEqual([3, 2]));
+        restored = SettingsMigrations.Read("{\"MarketChartPinnedPanes\":null}");
+        check("Null chart pins safely reload as an empty selection", restored.MarketChartPinnedPanes.Count == 0);
     }
 }

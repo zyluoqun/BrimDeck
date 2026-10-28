@@ -28,6 +28,14 @@ public sealed class TrayIcon : IDisposable
         Shell_NotifyIcon(0, ref _data);
     }
     private bool _ownsIcon;
+    internal void ShowNotification(string title, string message)
+    {
+        _data.InfoTitle = title.Length > 63 ? title[..63] : title;
+        _data.Info = message.Length > 255 ? message[..255] : message;
+        _data.Flags |= 0x10; _data.InfoFlags = 1 | 0x10; // NIIF_INFO | NIIF_NOSOUND: sound is a separate setting.
+        Shell_NotifyIcon(1, ref _data);
+        _data.Flags &= ~0x10u; _data.Info = ""; _data.InfoTitle = "";
+    }
     private long _dpi;
     // The notification area shows the small icon size at the primary monitor's scale. The executable's icon group carries
     // every size, so the exact one is extracted instead of scaling another.

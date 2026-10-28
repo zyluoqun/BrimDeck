@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "BrimDeck Chart Window",
+  "version": "1.3.0",
+  "description": "Open or activate your OpenMarket chart window for BrimDeck.",
+  "minimum_chrome_version": "120",
+  "permissions": ["nativeMessaging", "storage", "alarms", "scripting"],
+  "host_permissions": ["https://openmarket.xyz/*"],
+  "background": { "service_worker": "background.mjs", "type": "module" },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl9+978DR6LMgcm5l7IiTWy8EsD5X2/kahhJ5kNiRG7XnnKgg3rThBt8JH2Yo+HtY7TmBcjzDPYHcX5QM8SzB0xGq4kJplRVqIShnz2g0n/ZVA8+MvqcmdQFo55B7YaNZRfcbomNXpM0/zJ/7pZH0oXTaEU1iFutlqb5YmqpJRCC4o8lqpE5jo691pXHlyPa/oswaTGUA6Q2ATinTftcL/uaq5iy6xzcJ4viUBfiBQQ84UQMBMm+GWoERZ1HUUGeXmH4fxc6G9Gqy5x3jU0tjFU2O1vvS4PTFch9f5XqUHBnuMSOXzlYPNTXgQyov5ux6Tc02edEJ081egeRctoOE7QIDAQAB"
+}
