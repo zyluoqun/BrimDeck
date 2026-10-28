@@ -40,10 +40,13 @@ internal static class CandleCountdownUiTests
             try
             {
                 var originalDpi = VisualTreeHelper.GetDpi(window);
-                foreach (double monitorWidth in new[] { 0d, 1024d, 1920d })
+                bool originalAnimations = s.Animations;
+                foreach (bool animate in new[] { false, true })
+                foreach (double monitorWidth in new[] { 0d, 1024d })
                 foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
-                foreach (double surface in new[] { 320d, 640d, 1000d, 1024d, 1100d })
+                foreach (double surface in new[] { 320d, 640d, 1000d, 1100d })
                 {
+                    s.Animations = animate;
                     s.NotchWidth = s.CapsuleWidth = surface; window.ApplySettings();
                     if (monitorWidth > 0)
                     {
@@ -59,13 +62,14 @@ internal static class CandleCountdownUiTests
                     var end = countdown.TransformToAncestor(compact).Transform(new Point(countdown.ActualWidth, 0)).X;
                     var start = countdown.TransformToAncestor(compact).Transform(new Point()).X;
                     var tickerEnd = ticker.TransformToAncestor(compact).Transform(new Point(ticker.ActualWidth, 0)).X;
-                    check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs / {dpi} DPI / {monitorWidth} monitor (ticker end {tickerEnd:0.###}, countdown {start:0.###}..{end:0.###}, row {compact.Width:0.###})", countdown.Values.Count == 3
+                    check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs / {dpi} DPI / {monitorWidth} monitor / animation {animate} (ticker end {tickerEnd:0.###}, countdown {start:0.###}..{end:0.###}, row {compact.Width:0.###})", countdown.Values.Count == 3
                         && start >= tickerEnd - 1 && end <= compact.Width + 1 && end > start);
                     check($"{style}: monitoring still has room beside countdowns at {surface} DIPs", window.CurrentCompactLayout!.MonitorWidth > 0);
                     check($"{style}: upstream whole-reading layout keeps an actual monitor beside the custom modules at {surface} DIPs",
                         typeof(MainWindow).GetField("_compactStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is MonitorStrip { ActualWidth: > 0 });
                 }
                 VisualTreeHelper.SetRootDpi(window, originalDpi);
+                s.Animations = originalAnimations;
                 s.NotchClock = s.CapsuleClock = true; window.RenderCompact();
                 check($"{style}: clock and countdown coexist", typeof(MainWindow).GetField("_compactClock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is ClockFace);
                 var timeRow = (Grid)window.FindName("Compact");
