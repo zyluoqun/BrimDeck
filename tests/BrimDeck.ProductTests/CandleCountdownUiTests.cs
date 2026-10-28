@@ -62,6 +62,16 @@ internal static class CandleCountdownUiTests
                     var end = countdown.TransformToAncestor(compact).Transform(new Point(countdown.ActualWidth, 0)).X;
                     var start = countdown.TransformToAncestor(compact).Transform(new Point()).X;
                     var tickerEnd = ticker.TransformToAncestor(compact).Transform(new Point(ticker.ActualWidth, 0)).X;
+                    if (start < tickerEnd - 1 || end > compact.Width + 1 || end <= start)
+                    {
+                        for (DependencyObject? current = countdown; current is not null && current != compact; current = VisualTreeHelper.GetParent(current))
+                            if (current is FrameworkElement element)
+                            {
+                                double x = element.TransformToAncestor(compact).Transform(new Point()).X;
+                                Console.WriteLine($"LAYOUT: {element.GetType().Name} x={x:0.###} width={element.Width:0.###} actual={element.ActualWidth:0.###} desired={element.DesiredSize.Width:0.###} margin={element.Margin} slot={System.Windows.Controls.Primitives.LayoutInformation.GetLayoutSlot(element)}");
+                            }
+                        Console.WriteLine($"LAYOUT: ticker width={ticker.Width:0.###} actual={ticker.ActualWidth:0.###} margin={ticker.Margin}; countdown reserved={countdown.ReservedWidth:0.###}; actual DPI={VisualTreeHelper.GetDpi(window).DpiScaleX}");
+                    }
                     check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs / {dpi} DPI / {monitorWidth} monitor / animation {animate} (ticker end {tickerEnd:0.###}, countdown {start:0.###}..{end:0.###}, row {compact.Width:0.###})", countdown.Values.Count == 3
                         && start >= tickerEnd - 1 && end <= compact.Width + 1 && end > start);
                     check($"{style}: monitoring still has room beside countdowns at {surface} DIPs", window.CurrentCompactLayout!.MonitorWidth > 0);
