@@ -21,6 +21,8 @@ internal static class Program
         {
             var app = new BrimDeck.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             app.InitializeComponent(); PanelTheme.Use(app.Settings);
+            using var lyrics = new LyricsService();
+            typeof(BrimDeck.App).GetProperty("Lyrics", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, lyrics);
             CheckChartCredential();
             ChromeBridgeTests.Run(Check).GetAwaiter().GetResult();
             ChromeFocusTests.Run(Check).GetAwaiter().GetResult();
@@ -73,6 +75,12 @@ internal static class Program
                         && window.CompactMarketHoverArea.Right == window.Collapsed.Surface.Right);
                     s.NotchMonitor = s.CapsuleMonitor = true; window.RenderCompact();
                     Check("The real panel contains all four module buttons", new[] { "AIUsageButton", "MusicPageButton", "MonitorPageButton", "MarketPageButton" }.All(name => window.FindName(name) is Button));
+                    s.PageOrder = [DeckPage.Market, DeckPage.Monitor, DeckPage.Music, DeckPage.Usage];
+                    window.SelectPage(DeckPage.Market, remember: false);
+                    var pageButtons = (Panel)((Button)window.FindName("AIUsageButton")).Parent;
+                    Check("The market page follows the upstream customizable page order", pageButtons.Children.OfType<Button>().Select(button => button.Name)
+                        .SequenceEqual(["MarketPageButton", "MonitorPageButton", "MusicPageButton", "AIUsageButton"]));
+                    s.PageOrder = [.. DeckPages.Order]; window.SelectPage(DeckPage.Usage, remember: false);
                     CheckMarketList(window);
                     var sizes = (s.Width, s.Height, s.MusicWidth, s.MusicHeight, s.MonitorWidth, s.MonitorHeight);
                     s.MarketWidth = 1000; window.SelectPage(DeckPage.Market, remember: false);
@@ -206,6 +214,11 @@ internal static class Program
         var folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-Chart-" + Guid.NewGuid().ToString("N"));
         try
         {
+            System.IO.Directory.CreateDirectory(folder);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(folder, "portable.flag"), "BrimDeck portable market edition");
+            System.IO.File.WriteAllText(System.IO.Path.Combine(folder, PortableUpdate.ListFile), "BrimDeck.exe");
+            Check("The custom portable edition cannot install an upstream update over its custom features",
+                BrimDeck.Updates.GitHubUpdates.Mode("BrimDeck-Custom-Test", folder) == UpdateMode.None);
             BrimDeck.Native.OpenMarketChartConnection.Save(folder, "https://openmarket.xyz/chart/test-layout", "private-test-token");
             var restored = BrimDeck.Native.OpenMarketChartConnection.Load(folder);
             Check("Chart credentials round-trip through Windows user encryption", restored.WorkspaceId == "test-layout" && restored.Token == "private-test-token");

@@ -52,6 +52,8 @@ internal static class CandleCountdownUiTests
                     check($"{style}: three countdowns fit without overlapping ticker at {surface} DIPs", countdown.Values.Count == 3
                         && start >= tickerEnd - 1 && end <= compact.Width + 1 && end > start);
                     check($"{style}: monitoring still has room beside countdowns at {surface} DIPs", window.CurrentCompactLayout!.MonitorWidth > 0);
+                    check($"{style}: upstream whole-reading layout keeps an actual monitor beside the custom modules at {surface} DIPs",
+                        typeof(MainWindow).GetField("_compactStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is MonitorStrip { ActualWidth: > 0 });
                 }
                 s.NotchClock = s.CapsuleClock = true; window.RenderCompact();
                 check($"{style}: clock and countdown coexist", typeof(MainWindow).GetField("_compactClock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is ClockFace);
@@ -75,8 +77,42 @@ internal static class CandleCountdownUiTests
                 check($"{style}: changing periods updates compact and expanded views", expanded.Child is CandleCountdownStrip { Values.Count: 1 }
                     && ((CandleCountdownStrip)typeof(MainWindow).GetField("_compactCountdown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!).Values.Count == 1);
                 if (style == CompactStyle.Capsule) CheckSettings(app, check);
+                CheckCombinedRow(app, window, check);
             }
             finally { typeof(MainWindow).GetField("_retiring", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true); window.Close(); }
+        }
+    }
+
+    private static void CheckCombinedRow(BrimDeck.App app, MainWindow window, Action<string, bool> check)
+    {
+        var s = app.Settings;
+        var before = (s.PanelScale, s.NotchMusic, s.CapsuleMusic, s.NotchSummary, s.CapsuleSummary, s.MusicText, s.CandleCountdownPeriods);
+        var track = typeof(MainWindow).GetField("_mediaTrack", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var previous = track.GetValue(window);
+        try
+        {
+            s.NotchMusic = s.CapsuleMusic = s.NotchSummary = s.CapsuleSummary = true;
+            s.MusicText = CompactMusicText.Title; s.CandleCountdownPeriods = CandlePeriods.All;
+            foreach (int scale in PanelScales.Choices)
+            {
+                s.PanelScale = scale; window.ApplySettings();
+                track.SetValue(window, new MediaTrack { Id = "merge-layout-test", Title = "Combined layout", State = BrimDeck.Core.MediaState.Paused });
+                window.RenderCompact();
+                var compact = (Grid)window.FindName("Compact");
+                compact.Measure(new Size(compact.Width, compact.Height)); compact.Arrange(new Rect(0, 0, compact.Width, compact.Height)); compact.UpdateLayout();
+                foreach (string name in new[] { "_quotaCarousel", "_compactMarquee", "_compactEqualizer", "_compactClock", "_compactStrip", "_marketStrip", "_compactCountdown" })
+                {
+                    var control = typeof(MainWindow).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) as FrameworkElement;
+                    check($"{s.Style}: {name} coexists with every module at {scale}%", control is { ActualWidth: > 0 }
+                        && control.TransformToAncestor(compact).Transform(new Point()).X >= -1
+                        && control.TransformToAncestor(compact).Transform(new Point(control.ActualWidth, 0)).X <= compact.Width + 1);
+                }
+            }
+        }
+        finally
+        {
+            (s.PanelScale, s.NotchMusic, s.CapsuleMusic, s.NotchSummary, s.CapsuleSummary, s.MusicText, s.CandleCountdownPeriods) = before;
+            track.SetValue(window, previous);
         }
     }
 

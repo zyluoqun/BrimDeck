@@ -42,5 +42,17 @@ internal static class MarketProductTests
         check("Invalid and duplicate pins normalize to at most two lower chart panes", settings.MarketChartPinnedPanes.SequenceEqual([3, 2]));
         restored = SettingsMigrations.Read("{\"MarketChartPinnedPanes\":null}");
         check("Null chart pins safely reload as an empty selection", restored.MarketChartPinnedPanes.Count == 0);
+        settings.PageOrder = [DeckPage.Market, DeckPage.Monitor, DeckPage.Music, DeckPage.Usage];
+        restored = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
+        check("Custom market participates in the upstream saved page order", DeckPages.Visible(restored).SequenceEqual(settings.PageOrder)
+            && DeckPages.Resolve(restored, (DeckPage)999) == DeckPage.Market);
+        restored = SettingsMigrations.Read("{\"PageOrder\":[2,1,0]}");
+        check("Upstream settings without the market page retain it after the original pages", restored.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Music, DeckPage.Usage, DeckPage.Market]));
+        foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
+        {
+            double width = CompactMusicLayout.NaturalWidth(1, true, 3, true, 39.7, 150.2, 280, 260, dpi: dpi);
+            check($"Automatic market and countdown width survives device pixel rounding at {dpi}", DevicePixels.Down(width, dpi) + 1e-6
+                >= CompactMusicLayout.NaturalWidth(1, true, 3, true, 39.7, 150.2, 280, 260));
+        }
     }
 }
