@@ -39,7 +39,7 @@ internal static class ChromeChartPlacement
             cancellation.ThrowIfCancellationRequested();
             var state = readWindows();
             var matches = state.Windows.Where(w => stableTitle.Length > 0 && w.Title.Contains(stableTitle, StringComparison.Ordinal)).ToArray();
-            if (matches.Any(w => w.Handle == state.Foreground))
+            if (matches.Length == 1 && matches[0].Handle == state.Foreground)
             {
                 diagnostic?.Invoke($"Chrome focus confirmed attempt={attempt + 1}");
                 return state.Foreground;
@@ -47,9 +47,16 @@ internal static class ChromeChartPlacement
             if (attempt % 5 == 0) diagnostic?.Invoke($"Chrome focus waiting attempt={attempt + 1} matchingWindows={matches.Length}");
             // An ambiguous title must not move or activate an unrelated Chrome window.
             if (matches.Length == 1 && attempt % 3 == 0) activate(matches[0].Handle);
+            // Scheduled requests have no user gesture, so Windows can deny foreground activation.
+            // The unique per-request marker still identifies the exact window for monitor placement.
+            if (matches.Length == 1 && attempt == 29)
+            {
+                diagnostic?.Invoke("Chrome window identified by request marker; foreground denied, continuing");
+                return matches[0].Handle;
+            }
             if (attempt < 29) await Task.Delay(100, cancellation).ConfigureAwait(false);
         }
-        throw new InvalidOperationException(Loc.T("四屏 Chrome 窗口未获得焦点，请重试", "The chart Chrome window did not receive focus; retry"));
+        throw new InvalidOperationException(Loc.T("无法唯一识别已准备的 Chrome 图表窗口，请检查扩展后重试", "Could not uniquely identify the prepared Chrome chart window; check the extension and retry"));
     }
     private static (IntPtr Foreground, IReadOnlyList<WindowCandidate> Windows) ReadWindows()
     {

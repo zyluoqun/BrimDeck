@@ -41,6 +41,7 @@ internal sealed class ChromeChartBridge : IDisposable
             {
                 await pipe.WaitForConnectionAsync(_lifetime.Token).ConfigureAwait(false);
                 lock (_sync) { _pipe = pipe; _connected.TrySetResult(pipe); }
+                _diagnostic?.Invoke("Chrome native host connected");
                 while (await ChromeChartProtocol.ReadAsync(pipe, _lifetime.Token).ConfigureAwait(false) is { } message)
                 {
                     lock (_sync)
@@ -55,6 +56,7 @@ internal sealed class ChromeChartBridge : IDisposable
                     _pipe = null; _connected = NewConnection();
                     _reply?.TrySetException(new IOException(Loc.T("Chrome 联动连接已断开，请重试", "Chrome connection closed; retry the chart switch")));
                 }
+                _diagnostic?.Invoke("Chrome native host disconnected");
             }
         }
     }
@@ -132,6 +134,7 @@ internal sealed class ChromeChartBridge : IDisposable
         workspaceId = OpenMarketChartClient.ParseWorkspace(workspaceId);
         Task<NamedPipeServerStream> connection;
         lock (_sync) connection = _connected.Task;
+        if (!connection.IsCompleted) _diagnostic?.Invoke($"Chrome request type={type} waiting for native host");
         var pipe = await connection.WaitAsync(cancellation).ConfigureAwait(false);
         var response = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         string id = Guid.NewGuid().ToString("N");
@@ -142,24 +145,44 @@ internal sealed class ChromeChartBridge : IDisposable
             await ChromeChartProtocol.WriteAsync(pipe, new { type, id, workspaceId, windowId, tabId, state, nativeMarker,
                 targetBounds = targetBounds.HasValue ? new { left = bounds.Left, top = bounds.Top, width = bounds.Width, height = bounds.Height } : null,
                 expiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddSeconds(25).ToUnixTimeMilliseconds() }, cancellation).ConfigureAwait(false);
-            return await response.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            _diagnostic?.Invoke($"Chrome request type={type} sent");
+            var result = await response.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            _diagnostic?.Invoke($"Chrome reply type={type} received");
+            return result;
         }
         finally { lock (_sync) { _reply = null; _requestId = null; } }
     }
 
     internal static string FindChrome()
+        => FindChrome(InstalledChromeCandidates(), DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady)
+            .Select(drive => drive.RootDirectory.FullName), File.Exists);
+
+    internal static string FindChrome(IEnumerable<string> installedCandidates, IEnumerable<string> driveRoots, Func<string, bool> fileExists)
+    {
+        // Portable copies have no App Paths registration. Probe only known locations, without a recursive disk scan.
+        var portableCandidates = driveRoots.SelectMany(root => new[]
+        {
+            Path.Combine(root, "Program Files", "Chrome", "chrome.exe"),
+            Path.Combine(root, "Program Files (x86)", "Chrome", "chrome.exe"),
+            Path.Combine(root, "Chrome", "chrome.exe")
+        });
+        foreach (string path in installedCandidates.Concat(portableCandidates).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (fileExists(path)) return path;
+        throw new InvalidOperationException(Loc.T("未找到 Google Chrome，请先安装 Chrome", "Google Chrome was not found"));
+    }
+
+    private static IEnumerable<string> InstalledChromeCandidates()
     {
         foreach (var root in new[] { Registry.CurrentUser, Registry.LocalMachine })
         {
             using var key = root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe");
-            if (key?.GetValue("") is string path && File.Exists(path)) return path;
+            if (key?.GetValue("") is string path) yield return path;
         }
         foreach (var folder in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) })
         {
             string path = Path.Combine(folder, "Google", "Chrome", "Application", "chrome.exe");
-            if (File.Exists(path)) return path;
+            yield return path;
         }
-        throw new InvalidOperationException(Loc.T("未找到 Google Chrome，请先安装 Chrome", "Google Chrome was not found"));
     }
 
     internal static void RegisterHost(string directory)
@@ -171,11 +194,11 @@ internal sealed class ChromeChartBridge : IDisposable
         key.SetValue("", manifest);
     }
 
-    internal static async Task RunHostAsync(string origin)
+    internal static async Task RunHostAsync(string origin, string? pipeName = null)
     {
         if (origin != "chrome-extension://" + ChromeChartProtocol.ExtensionId + "/") return;
         using var lifetime = new CancellationTokenSource();
-        using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var pipe = new NamedPipeClientStream(".", pipeName ?? PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         try
         {
             await pipe.ConnectAsync(30000, lifetime.Token).ConfigureAwait(false);
@@ -186,10 +209,19 @@ internal sealed class ChromeChartBridge : IDisposable
                     await ChromeChartProtocol.WriteAsync(to, message, lifetime.Token).ConfigureAwait(false);
             }
             var incoming = Copy(input, pipe); var outgoing = Copy(pipe, output);
-            await Task.WhenAny(incoming, outgoing).ConfigureAwait(false);
-            lifetime.Cancel(); pipe.Dispose(); input.Dispose(); output.Dispose();
-            try { await Task.WhenAll(incoming, outgoing).ConfigureAwait(false); }
-            catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException or JsonException) { }
+            try
+            {
+                var completed = await Task.WhenAny(incoming, outgoing).ConfigureAwait(false);
+                await completed.ConfigureAwait(false);
+            }
+            finally
+            {
+                lifetime.Cancel(); pipe.Dispose(); input.Dispose(); output.Dispose();
+                // Windows stdin reads can ignore cancellation. Waiting for Chrome's open input here strands the host
+                // after BrimDeck restarts, so Chrome never sees a disconnect and never opens a fresh connection.
+                _ = Task.WhenAll(incoming, outgoing).ContinueWith(completed => { _ = completed.Exception; },
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
         }
         catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException or JsonException) { }
     }

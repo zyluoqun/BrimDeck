@@ -15,8 +15,13 @@ internal static class Program
     }
     // Builds and measures the real controls without showing windows, starting the app or reading accounts.
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args is ["--chrome-native-host-test", var pipeName])
+        {
+            BrimDeck.Native.ChromeChartBridge.RunHostAsync("chrome-extension://" + ChromeChartProtocol.ExtensionId + "/", pipeName).GetAwaiter().GetResult();
+            return 0;
+        }
         try
         {
             var app = new BrimDeck.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -24,6 +29,7 @@ internal static class Program
             using var lyrics = new LyricsService();
             typeof(BrimDeck.App).GetProperty("Lyrics", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, lyrics);
             CheckChartCredential();
+            ChromeExecutableTests.Run(Check);
             ChromeBridgeTests.Run(Check).GetAwaiter().GetResult();
             ChromeFocusTests.Run(Check).GetAwaiter().GetResult();
             app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);

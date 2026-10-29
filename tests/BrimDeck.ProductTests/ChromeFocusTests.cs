@@ -37,5 +37,17 @@ internal static class ChromeFocusTests
         foreground = other;
         result = await ChromeChartPlacement.WaitForWindowAsync(marker, () => (foreground, sameMarket), window => foreground = window, default);
         check("Two live ETH chart windows are disambiguated by the prepared tab marker", result == chart && foreground == chart);
+
+        var diagnostics = new List<string>();
+        int deniedActivations = 0;
+        result = await ChromeChartPlacement.WaitForWindowAsync(marker, () => (other, sameMarket),
+            _ => deniedActivations++, default, diagnostics.Add);
+        check("A scheduled close still identifies its chart when Windows refuses foreground activation",
+            result == chart && deniedActivations > 0 && diagnostics.Any(line => line.Contains("foreground denied")));
+
+        using var ambiguousForeground = new CancellationTokenSource(220); stopped = false;
+        try { await ChromeChartPlacement.WaitForWindowAsync(marker, () => (chart, duplicates), _ => wrongActivations++, ambiguousForeground.Token); }
+        catch (OperationCanceledException) { stopped = true; }
+        check("Foreground status cannot resolve duplicate request markers", stopped && wrongActivations == 0);
     }
 }

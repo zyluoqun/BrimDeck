@@ -44,12 +44,21 @@ internal static class OpenMarketPairTests
         try { await client.SwitchPairAsync(CandlePeriods.OneHour, deadline.Token); confirmed = true; }
         catch (OperationCanceledException) { }
         check("Stored state cannot claim success while live pane confirmation is blocked", !confirmed);
+        handler.BlockReads = false;
+        handler.SelectedWorkspace = "layout123";
+        using var reselectionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        bool reselected = false;
+        try { await client.SwitchPairAsync(CandlePeriods.FourHours, reselectionDeadline.Token); reselected = true; }
+        catch (OperationCanceledException) { }
+        check("A reused countdown client reselects BTC&ETH after a market click moved the shared session",
+            reselected && handler.SelectedWorkspace == "pair123" && handler.Panes.Values.All(p => p.Interval == "4h"));
     }
 
     private sealed class PairHandler : HttpMessageHandler
     {
         internal string[] Names = ["BTC&ETH"];
         internal string Mode = "1";
+        internal string SelectedWorkspace = "";
         internal bool SymbolSync = true, BlockReads;
         internal List<string> Writes = [], Targets = [];
         internal List<int> Reads = [];
@@ -67,8 +76,10 @@ internal static class OpenMarketPairTests
                 object data;
                 switch (name)
                 {
+                    case "chart_workspace_select": SelectedWorkspace = args.GetProperty("workspaceId").GetString()!;
+                        data = new { workspaceId = SelectedWorkspace, switched = true }; break;
                     case "chart_list": data = Names.Select((name, index) => new { name, shortId = index == 0 ? "pair123" : "pair456" }).ToArray(); break;
-                    case "chart_status": data = new { workspaces = new[] { new { workspaceId = "pair123", state = "open", humanPresent = true, hasStateSync = true, stateStale = false } } }; break;
+                    case "chart_status": data = new { workspaces = new[] { new { workspaceId = SelectedWorkspace, state = "open", humanPresent = true, hasStateSync = true, stateStale = false } } }; break;
                     case "chart_refresh": data = new { workspaceId = "pair123", workspace = new { multiCharts = new { mode = Mode,
                         layout = new { cols = 2, rows = 1, cells = new[] { new { col = 0, row = 0, colSpan = 1, rowSpan = 1 }, new { col = 1, row = 0, colSpan = 1, rowSpan = 1 } } },
                         syncStatus = new { symbol = SymbolSync, interval = false } } } }; break;

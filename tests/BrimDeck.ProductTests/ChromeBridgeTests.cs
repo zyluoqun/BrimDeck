@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using BrimDeck.Core;
@@ -7,6 +9,7 @@ internal static class ChromeBridgeTests
 {
     internal static async Task Run(Action<string, bool> check)
     {
+        await CheckNativeHostShutdown(check);
         string pipeName = "BrimDeck.Tests.Chrome." + Guid.NewGuid().ToString("N");
         using var bridge = new ChromeChartBridge(pipeName);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -46,5 +49,42 @@ internal static class ChromeBridgeTests
         try { ChromeChartBridge.WindowIdentity(JsonSerializer.SerializeToElement(new { id = clickId, protocolVersion = 3, nativeMarker = marker, title = "ETHUSDT" })); }
         catch (InvalidOperationException ex) { reloadRequested = ex.Message.Contains("重新加载") || ex.Message.Contains("Reload"); }
         check("An old extension is asked to reload instead of falling back to ambiguous coin titles", reloadRequested);
+    }
+
+    private static async Task CheckNativeHostShutdown(Action<string, bool> check)
+    {
+        foreach (bool closeChromeInput in new[] { true, false })
+        {
+            string pipeName = "BrimDeck.Tests.NativeHost." + Guid.NewGuid().ToString("N");
+            using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden,
+                CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "dotnet", StringComparison.OrdinalIgnoreCase))
+                start.ArgumentList.Add(typeof(ChromeBridgeTests).Assembly.Location);
+            start.ArgumentList.Add("--chrome-native-host-test"); start.ArgumentList.Add(pipeName);
+            using var host = Process.Start(start)!;
+            try
+            {
+                using var connectionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                await server.WaitForConnectionAsync(connectionDeadline.Token);
+                await ChromeChartProtocol.WriteAsync(server, new { id = "probe" }, connectionDeadline.Token);
+                var forwarded = await ChromeChartProtocol.ReadAsync(host.StandardOutput.BaseStream, connectionDeadline.Token);
+                check("The real native host forwards framed replies while Chrome keeps standard input open",
+                    forwarded?.GetProperty("id").GetString() == "probe");
+                if (closeChromeInput) host.StandardInput.Close();
+                else server.Dispose();
+                bool exited = false;
+                using var exitDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try { await host.WaitForExitAsync(exitDeadline.Token); exited = true; } catch (OperationCanceledException) { }
+                check(closeChromeInput ? "Closing Chrome input releases the native host and its app connection"
+                    : "Restarting BrimDeck releases the native host even while Chrome leaves standard input open",
+                    exited && host.ExitCode == 0);
+            }
+            finally
+            {
+                if (!host.HasExited) { host.Kill(); await host.WaitForExitAsync(); }
+            }
+        }
     }
 }

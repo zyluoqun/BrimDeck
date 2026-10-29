@@ -16,6 +16,9 @@ internal static class OpenMarketChartTests
         try { _ = OpenMarketChartClient.ParseWorkspace("https://example.com/chart/layout123"); } catch (ArgumentException) { badWorkspace = true; }
         check("Chart connections reject unrelated websites", badWorkspace);
         var coin = new MarketCoin("BTC", "BTCUSDT", true, 1, 1);
+        await CheckLoadedAcknowledgement(coin, check);
+        await CheckNetworkRecovery(coin, check);
+        await CheckWorkspaceReselection(coin, check);
         await CheckPinnedPanes(coin, check);
         var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => client.SwitchAsync(coin, CancellationToken.None)));
         check("Chart clicks rotate only through the three lower panes, including concurrent clicks", results.Select(r => r.ChartIndex).SequenceEqual([1, 2, 3, 1]));
@@ -134,7 +137,7 @@ internal static class OpenMarketChartTests
         bool confirmationCancelled = false;
         try { await cancelReadClient.SwitchAsync(coin, cancelConfirmation.Token); } catch (OperationCanceledException) { confirmationCancelled = true; }
         check("Cancellation during browser confirmation does not resend the mutation", confirmationCancelled && cancelReadHandler.Symbols.Count == 1);
-        cancelReadHandler.OnCall = null; cancelReadHandler.Loaded = true;
+        cancelReadHandler.OnCall = null; cancelReadHandler.Loaded = true; cancelReadHandler.OwnerAcknowledges = true;
         check("Cancelled confirmation releases the queue without advancing the rotation", (await cancelReadClient.SwitchAsync(coin, CancellationToken.None)).ChartIndex == 1);
 
         using var hungReadHandler = new ChartHandler { Loaded = false, HangRead = true };
@@ -159,6 +162,80 @@ internal static class OpenMarketChartTests
         check("Unicode symbol validation names the provider limitation instead of blaming credentials", refusalMessage.Contains("中文交易对") || refusalMessage.Contains("non-English symbols"));
         refusalHandler.FailSymbol = false;
         check("A provider Unicode rejection keeps the pending chart pane", (await refusal.SwitchAsync(coin, CancellationToken.None)).ChartIndex == 1);
+    }
+
+    private static async Task CheckLoadedAcknowledgement(MarketCoin coin, Action<string, bool> check)
+    {
+        foreach (string mismatch in new[] { "market", "interval" })
+        {
+            using var handler = new ChartHandler { Loaded = true, OwnerMarketMismatch = mismatch == "market",
+                OwnerInterval = mismatch == "interval" ? "1h" : "4h" };
+            using var http = new HttpClient(handler);
+            var client = new OpenMarketChartClient(http, "test-token", "layout123");
+            bool failed = false;
+            try { await client.SwitchAsync(coin, default); } catch (InvalidOperationException) { failed = true; }
+            check($"A loaded acknowledgement cannot report success while the browser still has the wrong {mismatch}",
+                failed && handler.ReadCount > 0 && handler.Symbols.Count == 1);
+            handler.OwnerMarketMismatch = false; handler.OwnerInterval = "4h";
+            check($"A loaded acknowledgement with an unconfirmed {mismatch} preserves the rotating pane for retry",
+                (await client.SwitchAsync(coin, default)).ChartIndex == 1);
+        }
+    }
+
+    private static async Task CheckNetworkRecovery(MarketCoin coin, Action<string, bool> check)
+    {
+        foreach (string operation in new[] { "initialize", "chart_workspace_select" })
+        {
+            using var handler = new ChartHandler { TransportFailureOperation = operation, TransportFailures = 3 };
+            using var http = new HttpClient(handler);
+            var diagnostics = new List<string>();
+            var client = new OpenMarketChartClient(http, "test-token", "layout123", diagnostics.Add);
+            ChartSwitchResult? result = null;
+            try { result = await client.SwitchAsync(coin, default); } catch (ChartConnectionException) { }
+            check($"A short connection outage during {operation} recovers automatically before one chart mutation",
+                result?.ChartIndex == 1 && handler.FailedTransportAttempts == 3 && handler.Symbols.Count == 1);
+            check($"Connection diagnostics classify {operation} failures without logging credential-bearing exception text",
+                diagnostics.Any(line => line.Contains("kind=SecureConnectionError") && line.Contains("cause=IOException"))
+                && diagnostics.All(line => !line.Contains("test-token")));
+        }
+        using var outageHandler = new ChartHandler { TransportFailureOperation = "initialize", TransportFailures = 100 };
+        using var outageHttp = new HttpClient(outageHandler);
+        var outageClient = new OpenMarketChartClient(outageHttp, "test-token", "layout123");
+        var elapsed = Stopwatch.StartNew();
+        bool failed = false;
+        try { await outageClient.SwitchAsync(coin, default); } catch (ChartConnectionException) { failed = true; }
+        check("A persistent connection failure stops bounded retries without writing or advancing the pane",
+            failed && elapsed.Elapsed < TimeSpan.FromSeconds(15) && outageHandler.Writes.Count == 0);
+        outageHandler.TransportFailures = 0;
+        check("A retry after a network outage still uses the original rotating pane",
+            (await outageClient.SwitchAsync(coin, default)).ChartIndex == 1);
+
+        using var cancelled = new CancellationTokenSource();
+        using var cancelHandler = new ChartHandler { TransportFailureOperation = "initialize", TransportFailures = 100,
+            OnTransportFailure = cancelled.Cancel };
+        using var cancelHttp = new HttpClient(cancelHandler);
+        var cancelClient = new OpenMarketChartClient(cancelHttp, "test-token", "layout123");
+        bool stopped = false;
+        try { await cancelClient.SwitchAsync(coin, cancelled.Token); } catch (OperationCanceledException) { stopped = true; }
+        check("Cancellation interrupts network recovery before any further request or chart write",
+            stopped && cancelHandler.FailedTransportAttempts == 1 && cancelHandler.Writes.Count == 0);
+    }
+
+    private static async Task CheckWorkspaceReselection(MarketCoin coin, Action<string, bool> check)
+    {
+        using var handler = new ChartHandler { Loaded = false };
+        using var http = new HttpClient(handler);
+        var client = new OpenMarketChartClient(http, "test-token", "layout123");
+        await client.SwitchAsync(coin, default);
+        // The countdown uses the same token and moves the service's live session to BTC&ETH.
+        handler.SelectedWorkspace = "pair123";
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        ChartSwitchResult? result = null;
+        try { result = await client.SwitchAsync(coin, deadline.Token); } catch (OperationCanceledException) { }
+        check("A cached four-pane client reselects its workspace after the countdown moved the shared session",
+            result?.ChartIndex == 2 && handler.SelectedWorkspace == "layout123" && handler.Symbols.Count == 2);
+        check("Reselecting the workspace still confirms the market in the browser and initializes the session only once",
+            handler.ReadCount == 2 && handler.Initializations == 1);
     }
 
     private static async Task CheckPinnedPanes(MarketCoin coin, Action<string, bool> check)
@@ -204,8 +281,14 @@ internal static class OpenMarketChartTests
         public bool ServiceDown, PersistentStream, OwnerMarketMismatch, OwnerAcknowledges = true;
         public bool DropSymbolReply, HangRead;
         public string? SymbolErrorCode, SymbolErrorMessage;
+        public string OwnerInterval = "4h";
         public int StaleStatusReads, DisconnectedStatusReads, PendingReadResponses, ReadCount;
         public bool WroteWhileStale;
+        public string SelectedWorkspace = "";
+        public int Initializations;
+        public string? TransportFailureOperation;
+        public int TransportFailures, FailedTransportAttempts;
+        public Action? OnTransportFailure;
         public Action<string>? OnCall;
         private bool _lastStatusReady = true;
         private readonly Dictionary<int, (string Symbol, string Exchange)> _applied = [];
@@ -220,15 +303,27 @@ internal static class OpenMarketChartTests
             Authorization = request.Headers.Authorization?.ToString();
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             var root = body.RootElement;
+            string operation = root.GetProperty("method").GetString() == "tools/call"
+                ? root.GetProperty("params").GetProperty("name").GetString()! : root.GetProperty("method").GetString()!;
+            if (operation == TransportFailureOperation && TransportFailures-- > 0)
+            {
+                FailedTransportAttempts++;
+                OnTransportFailure?.Invoke();
+                throw new HttpRequestException(HttpRequestError.SecureConnectionError, "TLS failure test-token", new IOException("test-token"));
+            }
             if (ServiceDown || root.GetProperty("method").GetString() == "tools/call"
                 && root.GetProperty("params").GetProperty("name").GetString() == "chart_status" && TemporaryReadFailures-- > 0)
                 return new(HttpStatusCode.ServiceUnavailable);
             object response;
             if (root.GetProperty("method").GetString() == "initialize")
+            {
+                Initializations++;
                 response = new { jsonrpc = "2.0", id = root.GetProperty("id").GetInt32(), result = new { protocolVersion = "2025-03-26" } };
+            }
             else
             {
                 var p = root.GetProperty("params"); string name = p.GetProperty("name").GetString()!; var args = p.GetProperty("arguments");
+                if (name == "chart_workspace_select") SelectedWorkspace = args.GetProperty("workspaceId").GetString()!;
                 OnCall?.Invoke(name);
                 if (name == "chart_read" && HangRead) await Task.Delay(Timeout.Infinite, cancellationToken);
                 bool stale = name == "chart_status" && StaleStatusReads-- > 0;
@@ -240,11 +335,11 @@ internal static class OpenMarketChartTests
                 object data = name switch
                 {
                     "chart_workspace_select" => new { workspaceId = "layout123", switched = true },
-                    "chart_status" => new { workspaces = new[] { new { workspaceId = "layout123", state = "open", humanPresent = Open && !disconnected, hasStateSync = true, stateStale = stale,
+                    "chart_status" => new { workspaces = new[] { new { workspaceId = SelectedWorkspace, state = "open", humanPresent = Open && !disconnected, hasStateSync = true, stateStale = stale,
                         panes = OwnerAcknowledges ? _applied.Select(p => new { chartIndex = p.Key, transformations = p.Value.Exchange + "|" + p.Value.Symbol, loadState = "loaded" }).ToArray() : [] } } },
                     "chart_read" => new { status = OwnerAcknowledges && !(pendingRead && ReadCount == 1) ? "ok" : "blocked", chart = new { chart_index = args.GetProperty("chartIndex").GetInt32(),
                         symbol = OwnerMarketMismatch || pendingRead ? "WRONGUSDT" : _applied.GetValueOrDefault(args.GetProperty("chartIndex").GetInt32()).Symbol,
-                        exchange = _applied.GetValueOrDefault(args.GetProperty("chartIndex").GetInt32()).Exchange, interval = "4h" } },
+                        exchange = _applied.GetValueOrDefault(args.GetProperty("chartIndex").GetInt32()).Exchange, interval = OwnerInterval } },
                     "chart_refresh" => new { workspaceId = "layout123", workspace = new { multiCharts = new {
                         mode = "4", layout = new { cols = 3, rows = 2, cells = new[] {
                             new { col = 0, row = 0, colSpan = ValidLayout ? 3 : 1, rowSpan = 1 },

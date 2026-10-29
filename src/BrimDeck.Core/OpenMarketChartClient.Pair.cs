@@ -12,12 +12,11 @@ public sealed partial class OpenMarketChartClient
             clientInfo = new { name = "BrimDeck", version = "1.0" } }, cancellation).ConfigureAwait(false);
         _sessionInitialized = true;
     }
-    private async Task InitializeWorkspaceAsync(CancellationToken cancellation)
+    private async Task SelectWorkspaceAsync(CancellationToken cancellation)
     {
-        if (_initialized) return;
         await InitializeSessionAsync(cancellation).ConfigureAwait(false);
+        // Clients sharing a token also share the service's active workspace. Another operation may have moved it.
         await CallAsync("chart_workspace_select", new { workspaceId = _workspace }, cancellation).ConfigureAwait(false);
-        _initialized = true;
     }
     public async Task<string> ResolveWorkspaceAsync(string name, CancellationToken cancellation)
     {
@@ -41,7 +40,7 @@ public sealed partial class OpenMarketChartClient
         await _gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
-            await InitializeWorkspaceAsync(cancellation).ConfigureAwait(false);
+            await SelectWorkspaceAsync(cancellation).ConfigureAwait(false);
             await WaitForPageAsync(cancellation).ConfigureAwait(false);
             var state = await CallAsync("chart_refresh", new { workspaceId = _workspace, full = true }, cancellation).ConfigureAwait(false);
             if (Text(state, "workspaceId") != _workspace || !state.TryGetProperty("workspace", out var workspace)

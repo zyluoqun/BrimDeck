@@ -15,6 +15,7 @@ public sealed class ChartConnectionException(string operation, int? statusCode, 
     private static string MessageFor(string operation, int? code, bool timedOut)
     {
         string step = operation switch {
+            "initialize" => Loc.T("建立图表连接", "establishing the chart connection"), "chart_workspace_select" => Loc.T("选择图表布局", "selecting the chart workspace"),
             "chart_symbol" => Loc.T("切换币种", "switching the market"), "chart_interval" => Loc.T("设置图表周期", "setting the chart interval"),
             "chart_refresh" => Loc.T("读取布局", "reading the layout"), _ => Loc.T("连接图表", "connecting the chart") };
         return code is { } status ? Loc.T($"OpenMarket 图表服务暂不可用（HTTP {status}，{step}），请稍后重试", $"OpenMarket chart service unavailable (HTTP {status}, {step}); try again shortly")
@@ -30,7 +31,6 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _workspace = ParseWorkspace(workspaceId);
     private int _nextPane = 1, _request;
-    private bool _initialized;
     private string? _session;
     public static string ParseWorkspace(string value)
     {
@@ -54,7 +54,7 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
         await _gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
-            await InitializeWorkspaceAsync(cancellation).ConfigureAwait(false);
+            await SelectWorkspaceAsync(cancellation).ConfigureAwait(false);
             await WaitForPageAsync(cancellation).ConfigureAwait(false);
             var state = await CallAsync("chart_refresh", new { workspaceId = _workspace, full = true }, cancellation).ConfigureAwait(false);
             ValidateLayout(state);
@@ -76,15 +76,14 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
                 _nextPane = pane == 3 ? 1 : pane + 1;
                 return new(pane, true);
             }
-            bool loaded = false;
             if (changed.TryGetProperty("load", out var load))
             {
-                var loadState = Text(load, "state"); loaded = loadState == "loaded";
+                var loadState = Text(load, "state");
                 diagnostic?.Invoke($"chart_symbol pane={pane} load={loadState} reason={Text(load, "reason")}");
                 if (loadState is "empty" or "error") throw new InvalidOperationException(Loc.T("目标图表未能加载行情，请检查网页后重试", "The pane could not load this market; check the page and retry"));
             }
-            // A REST save is not an execution acknowledgement from the user's open browser tab.
-            if (!loaded && !await ConfirmSwitchAsync(pane, coin, cancellation).ConfigureAwait(false))
+            // A loaded report alone does not verify both the market and interval in the live browser tab.
+            if (!await ConfirmSwitchAsync(pane, coin, cancellation).ConfigureAwait(false))
             {
                 diagnostic?.Invoke($"switch unconfirmed pane={pane}; rotation retained");
                 throw PageNotReady();
@@ -215,31 +214,34 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
     private async Task<JsonElement> RpcAsync(string method, object parameters, CancellationToken cancellation)
     {
         string operation = method == "tools/call" ? JsonSerializer.SerializeToElement(parameters).GetProperty("name").GetString()! : method;
-        bool read = operation is "initialize" or "chart_status" or "chart_refresh" or "chart_read" or "chart_list";
+        // Selecting the same workspace is idempotent; market and interval mutations must never be resent automatically.
+        bool retryable = operation is "initialize" or "chart_workspace_select" or "chart_status" or "chart_refresh" or "chart_read" or "chart_list";
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(TimeSpan.FromSeconds(25));
         for (int attempt = 0; ; attempt++)
         {
             var timer = Stopwatch.StartNew();
             try
             {
-                var result = await RpcOnceAsync(method, parameters, cancellation).ConfigureAwait(false);
+                if (attempt > 0)
+                    await Task.Delay(TimeSpan.FromMilliseconds(500 * (1 << (attempt - 1))), deadline.Token).ConfigureAwait(false);
+                timer.Restart();
+                var result = await RpcOnceAsync(method, parameters, deadline.Token).ConfigureAwait(false);
                 diagnostic?.Invoke($"{operation} attempt={attempt + 1} ok elapsedMs={timer.ElapsedMilliseconds}");
                 return result;
             }
             catch (Exception ex) when (ex is HttpRequestException || ex is OperationCanceledException && !cancellation.IsCancellationRequested)
             {
                 int? status = ex is HttpRequestException requestError && requestError.StatusCode is { } code ? (int)code : null;
-                diagnostic?.Invoke($"{operation} attempt={attempt + 1} http={status?.ToString() ?? "none"} error={ex.GetType().Name} elapsedMs={timer.ElapsedMilliseconds}");
-                if (!read || attempt >= 2 || status is not (null or 408 or 429 or 502 or 503 or 504))
+                string kind = ex is HttpRequestException networkError ? networkError.HttpRequestError.ToString() : "Timeout";
+                diagnostic?.Invoke($"{operation} attempt={attempt + 1} http={status?.ToString() ?? "none"} error={ex.GetType().Name} kind={kind} cause={ex.GetBaseException().GetType().Name} elapsedMs={timer.ElapsedMilliseconds}");
+                if (!retryable || attempt >= 4 || deadline.IsCancellationRequested || status is not (null or 408 or 429 or 502 or 503 or 504))
                     throw new ChartConnectionException(operation, status, ex is OperationCanceledException, ex);
-                await Task.Delay(TimeSpan.FromMilliseconds(attempt == 0 ? 200 : 600), cancellation).ConfigureAwait(false);
             }
         }
     }
     private async Task<JsonElement> RpcOnceAsync(string method, object parameters, CancellationToken cancellation)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(TimeSpan.FromSeconds(25));
-        cancellation = deadline.Token;
         int requestId = ++_request;
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://mcp.openmarket.xyz/")
         { Content = JsonContent.Create(new { jsonrpc = "2.0", id = requestId, method, @params = parameters }) };
