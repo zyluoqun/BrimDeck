@@ -166,11 +166,12 @@ internal static class CandleCountdownUiTests
             var toggles = Descendants(content).OfType<CheckBox>().ToArray();
             var clockToggle = toggles.Single(box => System.Windows.Automation.AutomationProperties.GetName(box) == clock);
             var countdownToggle = toggles.Single(box => System.Windows.Automation.AutomationProperties.GetName(box) == countdown);
-            var clockRow = (StackPanel)((Grid)clockToggle.Parent).Parent;
+            var clockRow = (Border)((Grid)clockToggle.Parent).Parent;
+            var parts = (StackPanel)clockRow.Parent;
             var countdownRow = (StackPanel)((Grid)countdownToggle.Parent).Parent;
-            var group = (StackPanel)clockRow.Parent;
-            check("Collapsed settings places countdown immediately after Clock", ReferenceEquals(group, countdownRow.Parent)
-                && group.Children.IndexOf(countdownRow) == group.Children.IndexOf(clockRow) + 2);
+            var group = (StackPanel)parts.Parent;
+            check("Collapsed settings places countdown immediately after Clock", parts.Children.OfType<Border>().Last() == clockRow
+                && ReferenceEquals(group, countdownRow.Parent) && group.Children.IndexOf(countdownRow) == group.Children.IndexOf(parts) + 2);
             check("Countdown settings offers only the approved three periods", names.Count(name => name.StartsWith(Loc.T("收盘倒计时 ", "Candle countdown "))) == 3);
             content.Measure(new Size(650, double.PositiveInfinity)); content.Arrange(new Rect(0, 0, 650, content.DesiredSize.Height)); content.UpdateLayout();
             SavePreview(content, "countdown-settings.png");

@@ -53,6 +53,8 @@ static class StorageTests
         check("Storage: internal buses", Storage.Internal(new("", 17, false)) && Storage.Internal(new("", 11, false)) && Storage.Internal(new("", 16, false))
             && !Storage.Internal(new("", 17, true)) && !Storage.Internal(new("", Storage.BusUsb, false)) && !Storage.Internal(new("", Storage.BusVirtual, false))
             && Storage.Internal(new("", Storage.BusFileBackedVirtual, false)) && !Storage.Internal(new("", Storage.BusFileBackedVirtual, true)) && !Storage.Internal(new("", Storage.BusSd, false)) && !Storage.Internal(new("", Storage.BusMmc, false)));
+        check("Storage: a drive behind a RAID controller is listed but not asked for its temperature", Storage.Internal(new("", Storage.BusRaid, false))
+            && !Storage.AsksTemperature(new("", Storage.BusRaid, false)) && Storage.AsksTemperature(new("", 17, false)) && Storage.AsksTemperature(new("", 11, false)));
         check("Storage: exactly 1 GB is listed", Storage.Group([(new StorageVolume("C:", "", G, 0), 0)], Disks).Count == 1 && Storage.Group([(new StorageVolume("C:", "", G - 1, 0), 0)], Disks).Count == 0);
     }
 
@@ -179,7 +181,8 @@ static class StorageTests
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Compact drive: Brief hides it", !readings.Single(r => r.Item == Storage_).Visible);
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50, 40);
-        var every = CompactMonitor.Every;
+        // The machine's power and battery are left out: they leave before both.
+        var every = CompactMonitor.Every & ~CompactMonitorItems.Power & ~CompactMonitorItems.Charge;
         double full = CompactMonitor.Width(every, width, 10);
         check("Compact drive: its own width; it leaves first when the row is short", width(Storage_) == 40 && CompactMonitor.Fit(every, width, 10, full) == every
             && CompactMonitor.Fit(every, width, 10, full - 1) == CompactMonitorItems.All && CompactMonitor.Fit(every, width, 10, full - 55) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));

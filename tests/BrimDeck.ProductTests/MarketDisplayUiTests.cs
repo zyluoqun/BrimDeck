@@ -56,7 +56,18 @@ internal static class MarketDisplayUiTests
                 var rows = controls.Children.OfType<Grid>().ToArray();
                 var boxes = rows.Select(grid => grid.Children.OfType<CheckBox>().Single()).ToArray();
                 check("Market settings contain four independent checkboxes", boxes.Length == 4 && boxes.All(box => box.IsChecked == true)
-                    && boxes.Select(box => box.Content?.ToString()).SequenceEqual(MarketBoards.Order.Select(MarketPageView.Label)));
+                    && boxes.Select(AutomationProperties.GetName).SequenceEqual(MarketBoards.Order.Select(ranking => Loc.T("行情榜单 ", "Market ranking ") + MarketPageView.Label(ranking))));
+                foreach (var grid in rows)
+                {
+                    grid.Measure(new Size(600, 44)); grid.Arrange(new Rect(0, 0, 600, 44)); grid.UpdateLayout();
+                    var label = grid.Children.OfType<TextBlock>().Single();
+                    var number = grid.Children.OfType<Border>().Single();
+                    var toggle = grid.Children.OfType<CheckBox>().Single();
+                    check("Board name, count and trailing switch occupy separate columns", Grid.GetColumn(label) == 0 && Grid.GetColumn(number) == 1 && Grid.GetColumn(toggle) == 2);
+                    check("Board count is centered and its switch reaches the trailing edge", Math.Abs(number.TranslatePoint(new Point(number.ActualWidth / 2, 0), grid).X - 300) < 1
+                        && Math.Abs(toggle.TranslatePoint(new Point(toggle.ActualWidth, 0), grid).X - 600) < 1);
+                    check("Board selectors use the shared switch appearance", ReferenceEquals(toggle.Style, window.FindResource("SettingsToggle")));
+                }
                 check("Each board exposes a default twenty-coin numeric input", rows.All(grid => Descendants(grid).OfType<TextBox>().Single().Text == "20"));
                 check("Board selectors have distinct accessible names", boxes.Select(AutomationProperties.GetName).Distinct().Count() == 4);
             }

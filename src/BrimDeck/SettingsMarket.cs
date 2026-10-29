@@ -16,8 +16,8 @@ public sealed partial class SettingsWindow
         foreach (var ranking in MarketBoards.Order)
         {
             string title = MarketPageView.Label(ranking);
-            var box = new CheckBox { Content = title, IsChecked = S.SelectedMarketRankings.Contains(ranking),
-                Foreground = UI.Brush(TextPrimary), FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var box = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.SelectedMarketRankings.Contains(ranking),
+                Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
             System.Windows.Automation.AutomationProperties.SetName(box, Loc.T("行情榜单 ", "Market ranking ") + title);
             void Select(bool on) => Change(s =>
             {
@@ -28,8 +28,10 @@ public sealed partial class SettingsWindow
             var controls = NumericControls(Loc.T(title + "显示数量", title + " coin count"), S.MarketCount(ranking), 1, 50, 1, Loc.T("个", "coins"),
                 value => Change(s => s.MarketCounts[ranking] = (int)value));
             var row = new Grid { Height = 44 };
-            row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-            row.Children.Add(box); Grid.SetColumn(controls.Number, 1); row.Children.Add(controls.Number); panel.Children.Add(row);
+            row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new());
+            var label = TextLine(title, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(label); Grid.SetColumn(controls.Number, 1); row.Children.Add(controls.Number);
+            Grid.SetColumn(box, 2); row.Children.Add(box); panel.Children.Add(row);
         }
         return panel;
     }

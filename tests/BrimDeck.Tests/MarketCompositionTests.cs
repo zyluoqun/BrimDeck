@@ -14,7 +14,7 @@ internal static class MarketCompositionTests
             (settings.CapsuleSummary, settings.CapsuleMusic, settings.CapsuleMonitor, settings.CapsuleClock,
                 settings.OpenDelay, settings.CloseDelay, settings.Maximized, settings.Borderless, settings.Exclusive));
         check("Both text styles add market as an optional content part", settings.CapsuleOrder.Contains(CompactPart.Market)
-            && settings.CapsuleOrder.Count == 4 && settings.NotchOrder.Contains(CompactPart.Market) && !settings.NotchMarket);
+            && settings.CapsuleOrder.Count == 6 && settings.NotchOrder.Contains(CompactPart.Market) && !settings.NotchMarket);
         settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Market, CompactPart.Rings, CompactPart.Monitor]);
         var saved = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Market position, ranking and original enabled content survive settings reload", saved.CapsuleOrder.SequenceEqual(settings.CapsuleOrder)
