@@ -31,7 +31,7 @@ internal sealed class MarketPageView : Grid
             var label = new TextBlock { Text = text, FontSize = size };
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); return label.DesiredSize.Width;
         }
-        double toolbar = Enum.GetValues<MarketRanking>().Sum(value => Math.Max(64, TextWidth(Label(value)) + 20) + 8)
+        double toolbar = MarketBoards.Order.Sum(value => Math.Max(64, TextWidth(Label(value)) + 20) + 8)
             + Math.Max(64, TextWidth(Loc.T("导入配置", "Import feed")) + 20);
         double symbol = snapshot.Rows(ranking).Select(coin => TextWidth(coin.Asset + (coin.Perpetual ? Loc.T("  合约", "  perpetual") : Loc.T("  现货", "  spot"))))
             .DefaultIfEmpty(80).Max();
@@ -47,7 +47,7 @@ internal sealed class MarketPageView : Grid
         configure.ToolTip = Loc.T("导入行情配置", "Import feed configuration");
         configure.Click += (_, _) => import(); DockPanel.SetDock(configure, Dock.Right); toolbar.Children.Add(configure);
         var tabs = new StackPanel { Orientation = Orientation.Horizontal };
-        foreach (var ranking in Enum.GetValues<MarketRanking>())
+        foreach (var ranking in MarketBoards.Order)
         {
             var button = TextButton(Label(ranking)); button.Margin = new Thickness(0, 0, 8, 0);
             button.Click += (_, _) => _select(ranking); _tabs[ranking] = button; tabs.Children.Add(button);
@@ -69,25 +69,25 @@ internal sealed class MarketPageView : Grid
         _countdown.Update(now, synchronized, settings.CandleCountdownHighlight);
     }
     internal static string Label(MarketRanking ranking) => ranking switch
-    { MarketRanking.Gainers => Loc.T("涨幅榜", "Gainers"), MarketRanking.Losers => Loc.T("跌幅榜", "Losers"), _ => Loc.T("热门", "Hot") };
+    { MarketRanking.Pool => Loc.T("观察池", "Watch pool"), MarketRanking.Gainers => Loc.T("涨幅榜", "Gainers"), MarketRanking.Losers => Loc.T("跌幅榜", "Losers"), _ => Loc.T("热门", "Hot") };
     private static Button TextButton(string text)
     {
         var button = new Button { Content = text, Padding = new Thickness(10, 4, 10, 4), MinWidth = 64, Height = 28, Foreground = UI.Brush(UI.Primary) };
         button.SetResourceReference(StyleProperty, "PanelTextButton"); return button;
     }
-    public void Update(MarketFeedSnapshot snapshot, MarketRanking ranking, string? error, string? chartStatus = null)
+    public void Update(MarketFeedSnapshot snapshot, MarketRanking ranking, string? error, string? chartStatus = null, int count = 50)
     {
         Ranking = ranking;
         foreach (var (key, tab) in _tabs) { tab.Foreground = UI.Brush(key == ranking ? UI.Accent : UI.Secondary); tab.FontWeight = key == ranking ? FontWeights.SemiBold : FontWeights.Normal; }
-        var problem = error ?? snapshot.Error ?? (ranking == MarketRanking.Hot ? snapshot.HotError : null);
-        var rows = problem is null ? snapshot.Rows(ranking) : [];
+        var problem = error ?? snapshot.BoardError(ranking);
+        IReadOnlyList<MarketCoin> rows = problem is null ? snapshot.Rows(ranking).Take(Math.Clamp(count, 1, 50)).ToArray() : [];
         string keyNow = ranking + "|" + string.Join('|', rows.Select(coin => coin.Symbol + ":" + coin.Perpetual));
         if (_key != keyNow && _pending.Count == 0)
         {
             _key = keyNow; _rows.Children.Clear(); _values.Clear(); ListScroll.ScrollToTop();
             for (int index = 0; index < rows.Count; index++) AddRow(rows[index], index + 1);
         }
-        _empty.Text = problem ?? Loc.T("等待服务端采集榜单", "Waiting for the server ranking snapshot");
+        _empty.Text = problem ?? (ranking == MarketRanking.Pool ? Loc.T("观察池暂无币种", "The observation pool is empty") : Loc.T("等待服务端采集榜单", "Waiting for the server ranking snapshot"));
         _empty.Foreground = UI.Brush(UI.Secondary); _empty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var now = DateTimeOffset.UtcNow;
         var quotes = rows.ToDictionary(coin => (coin.Symbol, coin.Perpetual));

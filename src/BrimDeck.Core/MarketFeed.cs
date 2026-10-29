@@ -4,7 +4,12 @@ using System.Text.RegularExpressions;
 
 namespace BrimDeck.Core;
 
-public enum MarketRanking { Hot, Gainers, Losers }
+public enum MarketRanking { Hot, Gainers, Losers, Pool }
+public static class MarketBoards
+{
+    public static IReadOnlyList<MarketRanking> Order { get; } = [MarketRanking.Pool, MarketRanking.Hot, MarketRanking.Gainers, MarketRanking.Losers];
+}
+public sealed record MarketDisplayCoin(MarketRanking Ranking, int Rank, MarketCoin Coin);
 public sealed record MarketCoin(string Asset, string Symbol, bool Perpetual, double? Change24h, long? QuoteAt)
 {
     public double? CurrentChange(DateTimeOffset now) => QuoteAt is { } at && at >= now.ToUnixTimeMilliseconds() - 60000
@@ -19,8 +24,14 @@ public sealed record MarketFeedSnapshot(long? SnapshotAt, IReadOnlyList<MarketCo
     IReadOnlyList<MarketCoin> Losers, string? Error, string? HotError)
 {
     public long? ServerTime { get; init; }
+    public IReadOnlyList<MarketCoin> Pool { get; init; } = [];
+    public string? PoolError { get; init; }
     public static MarketFeedSnapshot Empty { get; } = new(null, [], [], [], null, null);
-    public IReadOnlyList<MarketCoin> Rows(MarketRanking ranking) => ranking switch { MarketRanking.Gainers => Gainers, MarketRanking.Losers => Losers, _ => Hot };
+    public IReadOnlyList<MarketCoin> Rows(MarketRanking ranking) => ranking switch { MarketRanking.Pool => Pool, MarketRanking.Gainers => Gainers, MarketRanking.Losers => Losers, _ => Hot };
+    public string? BoardError(MarketRanking ranking) => ranking == MarketRanking.Pool ? PoolError : Error ?? (ranking == MarketRanking.Hot ? HotError : null);
+    public IReadOnlyList<MarketDisplayCoin> DisplayRows(DeckSettings settings) => settings.SelectedMarketRankings
+        .Where(ranking => BoardError(ranking) is null)
+        .SelectMany(ranking => Rows(ranking).Take(settings.MarketCount(ranking)).Select((coin, index) => new MarketDisplayCoin(ranking, index + 1, coin))).ToArray();
     public static MarketFeedSnapshot Parse(string json)
     {
         using var doc = JsonDocument.Parse(json);
@@ -46,7 +57,12 @@ public sealed record MarketFeedSnapshot(long? SnapshotAt, IReadOnlyList<MarketCo
         }
         long? at = root.TryGetProperty("snapshotAt", out var timestamp) && timestamp.ValueKind == JsonValueKind.Number && timestamp.TryGetInt64(out var ms) ? ms : null;
         long? serverTime = root.TryGetProperty("at", out var generated) && generated.ValueKind == JsonValueKind.Number && generated.TryGetInt64(out var serverMs) ? serverMs : null;
-        return new(at, Read("hot"), Read("gainers"), Read("losers"), Message("error"), Message("hotError")) { ServerTime = serverTime };
+        bool hasPool = root.TryGetProperty("pool", out _);
+        return new(at, Read("hot"), Read("gainers"), Read("losers"), Message("error"), Message("hotError"))
+        {
+            ServerTime = serverTime, Pool = hasPool ? Read("pool") : [],
+            PoolError = Message("poolError") ?? (hasPool ? null : Loc.T("行情服务尚未提供观察池数据", "The market service does not provide the observation pool yet"))
+        };
     }
 }
 public sealed record MarketFeedConfiguration(string Endpoint, string Token, bool AllowPrivateHttp = false)

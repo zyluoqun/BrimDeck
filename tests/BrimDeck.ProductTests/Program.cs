@@ -114,6 +114,7 @@ internal static class Program
                 Check("A failed configuration read releases the refresh gate for recovery", app.MarketError?.Contains("market-feed.json") == true);
             }
             CandleCountdownUiTests.Run(app, Check);
+            MarketDisplayUiTests.Run(app, Check);
             Console.WriteLine($"{_checks} product UI checks passed."); return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
@@ -125,7 +126,7 @@ internal static class Program
         var snapshot = new MarketFeedSnapshot(now, rows, rows.Take(12).ToArray(), rows.Take(10).ToArray(), null, null);
         CheckTickerWidths(snapshot);
         double preferred = MarketPageView.PreferredWidth(snapshot, MarketRanking.Hot);
-        Check("A short market list automatically uses a compact content width", preferred >= 360 && preferred < 440);
+        Check("A short market list reserves a compact toolbar for all four boards", preferred >= 360 && preferred < 560);
         var longRows = new[] { new MarketCoin(new string('W', 35), new string('W', 35) + "USDT", true, 1, now) };
         Check("Automatic market width grows for longer symbols", MarketPageView.PreferredWidth(new MarketFeedSnapshot(now, longRows, [], [], null, null), MarketRanking.Hot) > preferred);
         var view = new MarketPageView(_ => { }, () => { });
@@ -173,11 +174,12 @@ internal static class Program
     }
     private static void CheckTickerWidths(MarketFeedSnapshot snapshot)
     {
+        var settings = new DeckSettings { MarketCounts = new() { [MarketRanking.Hot] = 50 } };
         int Visible(double width)
         {
             MarketCoin? clicked = null;
             var ticker = new MarketTickerStrip(width, 24, 1, false, switchChart: coin => { clicked = coin; return Task.CompletedTask; });
-            ticker.Update(snapshot, MarketRanking.Hot, null);
+            ticker.Update(snapshot, settings, null);
             ticker.Measure(new Size(width, 24)); ticker.Arrange(new Rect(0, 0, width, 24)); ticker.UpdateLayout();
             var canvas = (Canvas)ticker.Children[0]; var row = (StackPanel)canvas.Children[0];
             var first = (Button)row.Children[0]; var label = (TextBlock)first.Content;
@@ -193,7 +195,7 @@ internal static class Program
                 && rank.NextInline is System.Windows.Documents.Run name && name.Text == snapshot.Hot[0].Asset + " ");
             ticker.SetPending([snapshot.Hot[0]]); ticker.UpdateLayout();
             Check("Ticker loading reserves its width without shifting the selected coin", ring.IsLoading && Math.Abs(first.ActualWidth - beforeWidth) < .01);
-            ticker.Update(snapshot with { Hot = snapshot.Hot.Reverse().ToArray() }, MarketRanking.Hot, null);
+            ticker.Update(snapshot with { Hot = snapshot.Hot.Reverse().ToArray() }, settings, null);
             Check("A ticker ranking refresh keeps the pending coin and spinner in place", ReferenceEquals(first, row.Children[0]) && ring.IsLoading);
             var pendingWheel = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120) { RoutedEvent = UIElement.MouseWheelEvent };
             canvas.RaiseEvent(pendingWheel);
@@ -208,7 +210,7 @@ internal static class Program
         var wide = CompactMusicLayout.Calculate(1000, 1, true, 3, true, 40, 150, 280);
         Check("Manual widening shows more complete coins beside original modules", Visible(wide.MarketWidth) > Visible(narrow.MarketWidth));
         var cycling = new MarketTickerStrip(180, 24, 1, true);
-        cycling.Update(snapshot, MarketRanking.Hot, null);
+        cycling.Update(snapshot, settings, null);
         var cycleRow = (StackPanel)((Canvas)cycling.Children[0]).Children[0];
         var ranks = cycleRow.Children.Cast<Button>().Select(button => ((TextBlock)button.Content).Inlines.OfType<System.Windows.Documents.Run>().First().Text).ToArray();
         var expected = Enumerable.Range(1, snapshot.Hot.Count).Select(index => index + ".").ToArray();

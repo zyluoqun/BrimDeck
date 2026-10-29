@@ -9,7 +9,7 @@ public partial class MainWindow
 {
     private MarketTickerStrip? _marketStrip;
     private TimeSpan _marketElapsed;
-    private MarketRanking? _marketRankingRendered;
+    private string? _marketSelectionRendered;
     private MarketPageView? _marketPageView;
     private bool IsMarketPage => CurrentPage == DeckPage.Market;
     private bool MarketSummaryActive => EffectiveStyle != CompactStyle.Line && Settings.ShowsMarket(EffectiveStyle);
@@ -36,8 +36,8 @@ public partial class MainWindow
     }
     private void UpdateMarketStrip()
     {
-        if (MarketSummaryActive) _marketStrip?.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
-        _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus);
+        if (MarketSummaryActive) _marketStrip?.Update(_app.Market, Settings, _app.MarketError);
+        _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus, Settings.MarketCount(Settings.MarketRanking));
         if (IsMarketPage)
         {
             double width = Math.Max(240, Math.Min(MarketPageView.PreferredWidth(_app.Market, Settings.MarketRanking), WorkDip.Width - 24));
@@ -47,15 +47,16 @@ public partial class MainWindow
     }
     private MarketTickerStrip CreateMarketStrip(double width, double rowHeight, double scale)
     {
-        if (_marketRankingRendered != Settings.MarketRanking) _marketElapsed = TimeSpan.Zero;
-        _marketRankingRendered = Settings.MarketRanking;
+        string selection = string.Join('|', Settings.SelectedMarketRankings.Select(ranking => $"{ranking}:{Settings.MarketCount(ranking)}"));
+        if (_marketSelectionRendered != selection) _marketElapsed = TimeSpan.Zero;
+        _marketSelectionRendered = selection;
         _marketStrip = new MarketTickerStrip(width, rowHeight, scale,
             Settings.Animations && SystemParameters.ClientAreaAnimation, _marketElapsed, _app.SwitchMarketChartAsync);
         _marketStrip.MouseEnter += (_, _) => { if (!_expanded && !_preview) TrackCompactHover(true, true); };
         var menu = new ContextMenu();
         var settings = new MenuItem { Header = Loc.T("设置", "Settings") };
         settings.Click += (_, _) => _app.OpenSettings(); menu.Items.Add(settings); _marketStrip.ContextMenu = menu;
-        _marketStrip.Update(_app.Market, Settings.MarketRanking, _app.MarketError);
+        _marketStrip.Update(_app.Market, Settings, _app.MarketError);
         _marketStrip.SetPending(_app.PendingChartCoins);
         return _marketStrip;
     }
@@ -77,7 +78,7 @@ public partial class MainWindow
             MarketContent.Children.Add(_marketPageView);
             _marketPageView.SetPending(_app.PendingChartCoins);
         }
-        _marketPageView.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus);
+        _marketPageView.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus, Settings.MarketCount(Settings.MarketRanking));
         _marketPageView.UpdateCountdown(Settings, _app.CandleClock.UtcNow, _app.CandleClock.IsSynchronized);
     }
     private async void ImportMarketConfiguration()
@@ -101,11 +102,12 @@ public partial class MainWindow
         bool shown = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.LineMarket && _alert is null;
         MarketIndicator.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         if (!shown) { Island.ToolTip = null; return; }
-        var coin = _app.Market.Rows(Settings.MarketRanking).FirstOrDefault();
+        var entry = _app.Market.DisplayRows(Settings).FirstOrDefault();
+        var coin = entry?.Coin;
         var change = coin?.CurrentChange(DateTimeOffset.UtcNow);
         MarketIndicator.Height = Collapsed.Surface.Height; MarketIndicator.Width = Math.Min(6, Collapsed.Surface.Width / 4);
         MarketIndicator.Background = UI.Brush(_app.MarketError is not null ? "#FBBF24" : change is > 0 ? "#36D399" : change is < 0 ? "#FB7185" : UI.Tertiary);
-        Island.ToolTip = MarketPageView.Label(Settings.MarketRanking) + " · " + (change is { } percent ? $"{coin!.Asset} {percent:+0.00;-0.00;0.00}%" : Loc.T("等待有效行情", "Waiting for current quotes"))
+        Island.ToolTip = string.Join(" / ", Settings.SelectedMarketRankings.Select(MarketPageView.Label)) + " · " + (change is { } percent ? $"{coin!.Asset} {percent:+0.00;-0.00;0.00}%" : Loc.T("等待有效行情", "Waiting for current quotes"))
             + Loc.T(" · 悬停查看完整榜单", " · hover for the full ranking");
     }
     internal string RuntimeAppearanceDescription

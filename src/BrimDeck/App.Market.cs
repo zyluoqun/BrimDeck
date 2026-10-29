@@ -108,7 +108,7 @@ public partial class App
             var configuration = MarketFeedConfiguration.Load(AppContext.BaseDirectory);
             Market = await new MarketFeedClient(_marketHttp, configuration).ReadAsync(Lifetime.Token);
             if (Market.ServerTime is not { } serverTime || !CandleClock.Synchronize(serverTime, System.Diagnostics.Stopwatch.GetElapsedTime(clockStarted))) CandleClock.MarkUnavailable();
-            MarketError = Market.Error;
+            MarketError = null;
         }
         catch (OperationCanceledException) { CandleClock.MarkUnavailable(); if (!Exiting) { Market = MarketFeedSnapshot.Empty; MarketError = Loc.T("行情连接超时", "Market connection timed out"); } }
         catch (Exception ex) when (ex is IOException or InvalidDataException or HttpRequestException or System.Text.Json.JsonException or ArgumentException or InvalidOperationException)

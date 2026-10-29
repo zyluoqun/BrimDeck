@@ -14,6 +14,7 @@ Directory.CreateDirectory(root);
 try
 {
     await MarketFeedTests.Run(Check);
+    MarketDisplayTests.Run(Check);
     await OpenMarketChartTests.Run(Check);
     await OpenMarketPairTests.Run(Check);
     await ChromeChartProtocolTests.Run(Check);

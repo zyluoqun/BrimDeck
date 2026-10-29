@@ -7,6 +7,32 @@ namespace BrimDeck;
 
 public sealed partial class SettingsWindow
 {
+    private FrameworkElement MarketRankingChoice()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(TextLine(Loc.T("行情榜单（可多选）", "Market rankings (select multiple)"), 13, TextPrimary, FontWeights.SemiBold));
+        var hint = TextLine(Loc.T("按下列顺序滚动显示，每个榜单独立设置 1–50 个币种，默认 20 个。", "Scrolls in the order below. Each board shows 1–50 coins, with 20 by default."), 11, TextSecondary);
+        hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 4, 0, 4); panel.Children.Add(hint);
+        foreach (var ranking in MarketBoards.Order)
+        {
+            string title = MarketPageView.Label(ranking);
+            var box = new CheckBox { Content = title, IsChecked = S.SelectedMarketRankings.Contains(ranking),
+                Foreground = UI.Brush(TextPrimary), FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            System.Windows.Automation.AutomationProperties.SetName(box, Loc.T("行情榜单 ", "Market ranking ") + title);
+            void Select(bool on) => Change(s =>
+            {
+                s.MarketRankings = s.SelectedMarketRankings.Where(value => value != ranking).ToList();
+                if (on) s.MarketRankings.Add(ranking);
+            });
+            box.Checked += (_, _) => Select(true); box.Unchecked += (_, _) => Select(false);
+            var controls = NumericControls(Loc.T(title + "显示数量", title + " coin count"), S.MarketCount(ranking), 1, 50, 1, Loc.T("个", "coins"),
+                value => Change(s => s.MarketCounts[ranking] = (int)value));
+            var row = new Grid { Height = 44 };
+            row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            row.Children.Add(box); Grid.SetColumn(controls.Number, 1); row.Children.Add(controls.Number); panel.Children.Add(row);
+        }
+        return panel;
+    }
     private void MarketSizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());

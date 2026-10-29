@@ -70,9 +70,6 @@ public sealed partial class SettingsWindow
                 TextLine(Loc.T("行情区域悬停暂停滚动，不展开面板。点击币种依次切换网页下方三屏，默认 4h；其他区域保持悬停展开。", "Hovering market data pauses scrolling without expanding. Click a coin to rotate through the three lower browser charts at 4h; other areas retain hover expansion."), 11, TextSecondary));
         }
     }
-    private FrameworkElement MarketRankingChoice() => MusicChoice(Loc.T("行情榜单", "Market ranking"), S.MarketRanking,
-        new[] { (MarketRanking.Hot, Loc.T("热门", "Hot")), (MarketRanking.Gainers, Loc.T("涨幅榜", "Gainers")), (MarketRanking.Losers, Loc.T("跌幅榜", "Losers")) }, value => Change(s => s.MarketRanking = value));
-
     private const double PartRowHeight = 44, PartHandleWidth = 40;
     // One draggable row of the collapsed content: the handle, the name and the switch.
     private Border PartRow(CompactStyle style, CompactPart part, StackPanel rows)

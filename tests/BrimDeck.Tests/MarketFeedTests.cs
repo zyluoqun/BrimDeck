@@ -7,11 +7,16 @@ internal static class MarketFeedTests
         const string json = """
             {"at":2000,"snapshotAt":1000,"hot":[{"asset":"PEPE","symbol":"1000PEPEUSDT","perpetual":true,"change24h":2.35,"quoteAt":2000}],
              "gainers":[{"asset":"UP","symbol":"UPUSDT","perpetual":true,"change24h":5,"quoteAt":2000}],
-             "losers":[{"asset":"DOWN","symbol":"DOWNUSDT","perpetual":true,"change24h":null}],"error":null,"hotError":null}
+             "losers":[{"asset":"DOWN","symbol":"DOWNUSDT","perpetual":true,"change24h":null}],
+             "pool":[{"asset":"WATCH","symbol":"WATCHUSDT","perpetual":true,"change24h":1.5,"quoteAt":2000}],"error":null,"hotError":null}
             """;
         var snapshot = MarketFeedSnapshot.Parse(json);
         check("Countdown calibration uses current response time instead of ranking snapshot time", snapshot.ServerTime == 2000 && snapshot.SnapshotAt == 1000);
         check("Market feed preserves actual contract symbols and selected ranking", snapshot.Rows(MarketRanking.Hot).Single().Symbol == "1000PEPEUSDT" && snapshot.Rows(MarketRanking.Gainers).Single().Asset == "UP");
+        check("The observation pool is a separate fourth market board", snapshot.Rows((MarketRanking)3).Single().Symbol == "WATCHUSDT");
+        var oldFeed = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject(); oldFeed.Remove("pool");
+        var oldSnapshot = MarketFeedSnapshot.Parse(oldFeed.ToJsonString());
+        check("Older feeds retain their rankings and explicitly report an unavailable observation pool", oldSnapshot.Hot.Count == 1 && oldSnapshot.Pool.Count == 0 && oldSnapshot.PoolError is not null);
         check("Missing market changes stay missing", snapshot.Rows(MarketRanking.Losers).Single().Change24h is null);
         check("Market links preserve spot and futures identity", MarketCoin.ChartUrl("1000PEPEUSDT", true).Contains("BINANCE_FUTURES%3A1000PEPEUSDT") && MarketCoin.ChartUrl("OSMOUSDT", false).Contains("BINANCE%3AOSMOUSDT"));
         bool invalid = false;
