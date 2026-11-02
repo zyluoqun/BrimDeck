@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using BrimDeck;
 using BrimDeck.Core;
 
@@ -24,15 +25,20 @@ internal static class Program
         }
         try
         {
-            var app = new BrimDeck.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            var app = CreateFixtureApp();
             app.InitializeComponent(); PanelTheme.Use(app.Settings);
+            ChartSwitchFeedbackUiTests.Run(app, Check);
+            if (args is ["--chart-feedback"]) { Console.WriteLine($"{_checks} chart feedback checks passed."); return 0; }
             using var lyrics = new LyricsService();
             typeof(BrimDeck.App).GetProperty("Lyrics", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, lyrics);
+            MarketAutoWidthUiTests.Run(app, Check);
+            if (args is ["--market-auto-width"]) { Console.WriteLine($"{_checks} market auto-width checks passed."); return 0; }
             CheckChartCredential();
             ChromeExecutableTests.Run(Check);
             ChromeBridgeTests.Run(Check).GetAwaiter().GetResult();
             ChromeFocusTests.Run(Check).GetAwaiter().GetResult();
             app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);
+            ChartWorkspaceRecoveryUiTests.Run(app, Check);
             foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule })
             {
                 var s = app.Settings; s.Style = style; s.NotchSummary = s.CapsuleSummary = false; s.NotchMusic = s.CapsuleMusic = false;
@@ -190,8 +196,9 @@ internal static class Program
                 && label.ActualWidth >= label.DesiredSize.Width && label.ActualWidth > 75);
             double beforeWidth = first.ActualWidth;
             var ring = label.Inlines.OfType<System.Windows.Documents.InlineUIContainer>().Select(inline => inline.Child).OfType<MarketLoadingRing>().Single();
-            Check("The loading ring precedes an adjacent rank and coin name", label.Inlines.FirstInline is System.Windows.Documents.InlineUIContainer
-                && label.Inlines.ElementAt(1) is System.Windows.Documents.Run rank && rank.Text == "1."
+            Check("The loading ring and board icon precede an adjacent rank and coin name", label.Inlines.FirstInline is System.Windows.Documents.InlineUIContainer
+                && label.Inlines.ElementAt(1) is System.Windows.Documents.InlineUIContainer icon && icon.Child is System.Windows.Shapes.Path
+                && label.Inlines.ElementAt(2) is System.Windows.Documents.Run rank && rank.Text == "1."
                 && rank.NextInline is System.Windows.Documents.Run name && name.Text == snapshot.Hot[0].Asset + " ");
             ticker.SetPending([snapshot.Hot[0]]); ticker.UpdateLayout();
             Check("Ticker loading reserves its width without shifting the selected coin", ring.IsLoading && Math.Abs(first.ActualWidth - beforeWidth) < .01);
@@ -233,6 +240,9 @@ internal static class Program
             Check("Chart configuration never persists a plaintext token", System.IO.Directory.GetFiles(folder).All(path => !System.Text.Encoding.UTF8.GetString(System.IO.File.ReadAllBytes(path)).Contains("private-test-token")));
             BrimDeck.Native.OpenMarketChartConnection.Save(folder, "other-layout", "");
             Check("Saving a workspace with a blank token retains the encrypted credential", BrimDeck.Native.OpenMarketChartConnection.Load(folder).Token == "private-test-token");
+            BrimDeck.Native.OpenMarketChartConnection.Save(folder, "", "");
+            var tokenOnly = BrimDeck.Native.OpenMarketChartConnection.Load(folder);
+            Check("Authorization can be saved before selecting a workspace", tokenOnly.WorkspaceId == "" && tokenOnly.Token == "private-test-token");
         }
         finally
         {
@@ -242,5 +252,20 @@ internal static class Program
                 System.IO.Directory.Delete(folder);
             }
         }
+    }
+
+    // Application queues startup in its constructor. These fixtures pump the dispatcher for
+    // async controls, so cancel constructor-posted work before any real app startup can run.
+    private static BrimDeck.App CreateFixtureApp()
+    {
+        var pending = new List<DispatcherOperation>();
+        var hooks = Dispatcher.CurrentDispatcher.Hooks;
+        DispatcherHookEventHandler posted = (_, e) => pending.Add(e.Operation);
+        hooks.OperationPosted += posted;
+        BrimDeck.App app;
+        try { app = new BrimDeck.App { ShutdownMode = ShutdownMode.OnExplicitShutdown }; }
+        finally { hooks.OperationPosted -= posted; }
+        foreach (var operation in pending) operation.Abort();
+        return app;
     }
 }

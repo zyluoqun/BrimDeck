@@ -423,6 +423,7 @@ public sealed class DeckSettings
     [JsonIgnore] public IReadOnlyList<MarketRanking> SelectedMarketRankings => MarketBoards.Order.Where((MarketRankings ?? [MarketRanking]).Contains).ToArray();
     public int MarketCount(MarketRanking ranking) => Math.Clamp(MarketCounts?.GetValueOrDefault(ranking, 20) ?? 20, 1, 50);
     public List<int> MarketChartPinnedPanes { get; set; } = [];
+    public Dictionary<string, ChartRotationSettings> MarketChartWorkspaces { get; set; } = [];
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value, capsule: true); }
@@ -544,6 +545,7 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.MarketChartPinnedPanes = [.. MarketChartPinnedPanes ?? []];
+        copy.MarketChartWorkspaces = (MarketChartWorkspaces ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.MarketRankings = MarketRankings is null ? null : [.. MarketRankings];
         copy.MarketCounts = new(MarketCounts ?? []);
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
@@ -604,6 +606,9 @@ public sealed class DeckSettings
         MarketRankings = (MarketRankings ?? [MarketRanking]).Where(Enum.IsDefined).Distinct().ToList();
         MarketCounts = (MarketCounts ?? []).Where(pair => Enum.IsDefined(pair.Key)).ToDictionary(pair => pair.Key, pair => Math.Clamp(pair.Value, 1, 50));
         MarketChartPinnedPanes = (MarketChartPinnedPanes ?? []).Where(pane => pane is >= 1 and <= 3).Distinct().Take(2).ToList();
+        MarketChartWorkspaces = (MarketChartWorkspaces ?? []).Where(pair => pair.Key.Length > 0 && pair.Value is not null).ToDictionary(pair => pair.Key, pair => new ChartRotationSettings {
+            Name = pair.Value.Name ?? "", LayoutSignature = pair.Value.LayoutSignature ?? "", Interval = ChartIntervals.Normalize(pair.Value.Interval),
+            PinnedPanes = (pair.Value.PinnedPanes ?? []).Where(pane => pane >= 0).Distinct().Order().ToList() });
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         CandleCountdownPeriods &= CandlePeriods.All;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;

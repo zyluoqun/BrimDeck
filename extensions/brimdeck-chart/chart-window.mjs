@@ -19,6 +19,19 @@ function chartWorkspace(url) {
 }
 const tabAddress = tab => tab.pendingUrl || tab.url;
 
+async function waitForChart(chrome, request, tabId) {
+  for (;;) {
+    checkRequest(request);
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete') {
+      if (matches(tab.url, request.workspaceId) && matches(tabAddress(tab), request.workspaceId)) return tab;
+      if (!matches(tab.pendingUrl, request.workspaceId))
+        throw new Error('请先在 Chrome 中登录 OpenMarket 并打开目标布局 / OpenMarket login required');
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+}
+
 export async function prepareChart(chrome, request) {
   checkRequest(request);
   if (typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(request.id)) throw new Error('Invalid chart request id');
@@ -34,21 +47,22 @@ export async function prepareChart(chrome, request) {
   const tabs = (await chrome.tabs.query({ url: 'https://openmarket.xyz/chart/*' }))
     .filter(tab => !tab.incognito && chartWorkspace(tabAddress(tab)));
   const local = tabs.filter(tab => targetIds.has(tab.windowId));
-  const pool = local.length ? local : tabs;
   const saved = await chrome.storage.session.get('chartTabs');
   const recent = await chrome.windows.getLastFocused().catch(() => ({}));
   const choose = candidates => candidates.find(tab => tab.id === saved.chartTabs?.[request.workspaceId])
     || candidates.find(tab => tab.windowId === recent.id && tab.active)
     || candidates.find(tab => tab.windowId === recent.id) || candidates.find(tab => tab.active) || candidates[0];
-  let tab = choose(pool.filter(tab => matches(tabAddress(tab), request.workspaceId))) || choose(pool);
+  // A workspace owns one tab across all displays. Reusing an unrelated local tab creates
+  // another copy when the requested workspace is already open on a different monitor.
+  let tab = choose(local.filter(tab => matches(tabAddress(tab), request.workspaceId)))
+    || choose(tabs.filter(tab => matches(tabAddress(tab), request.workspaceId)));
   const destination = targetWindows.find(window => window.id === recent.id) || targetWindows[0];
   const position = { left: Math.round(bounds.left + 40), top: Math.round(bounds.top + 40),
     width: Math.max(320, Math.round(bounds.width - 80)), height: Math.max(240, Math.round(bounds.height - 80)) };
-  let navigationFrom;
   checkRequest(request);
   if (tab) {
     tab = await chrome.tabs.get(tab.id);
-    if (!chartWorkspace(tabAddress(tab))) throw new Error(tabAddress(tab)?.startsWith('https://openmarket.xyz/login')
+    if (!matches(tabAddress(tab), request.workspaceId)) throw new Error(tabAddress(tab)?.startsWith('https://openmarket.xyz/login')
       ? '请先在 Chrome 中登录 OpenMarket / OpenMarket login required' : 'The chart tab navigated away; retry');
     // Transfer the selected tab, never reposition its source window and the unrelated tabs inside it.
     if (!targetIds.has(tab.windowId)) {
@@ -60,12 +74,6 @@ export async function prepareChart(chrome, request) {
         tab = await chrome.tabs.get(tab.id);
       }
     }
-    if (!matches(tabAddress(tab), request.workspaceId)) {
-      checkRequest(request);
-      navigationFrom = tab.url;
-      tab = await chrome.tabs.update(tab.id, { url: 'https://openmarket.xyz/chart/' + request.workspaceId, active: true });
-      if (!tab) throw new Error('The chart tab closed during layout selection');
-    }
   } else if (destination) {
     tab = await chrome.tabs.create({ windowId: destination.id, url: 'https://openmarket.xyz/chart/' + request.workspaceId, active: true });
   } else {
@@ -76,16 +84,26 @@ export async function prepareChart(chrome, request) {
   }
   const windowId = tab.windowId;
   await chrome.storage.session.set({ chartTabs: { ...saved.chartTabs, [request.workspaceId]: tab.id } });
-  // Loading the page is distinct from the chart's live connection, which BrimDeck verifies afterwards.
-  for (;;) {
+  tab = await waitForChart(chrome, request, tab.id);
+  let closedDuplicates = 0;
+  // Close only exact duplicates, after rechecking both tabs against concurrent user navigation.
+  for (const candidate of tabs.filter(other => other.id !== tab.id && matches(other.url, request.workspaceId))) {
     checkRequest(request);
-    tab = await chrome.tabs.get(tab.id);
-    if (tab.status === 'complete') {
-      if (matches(tab.url, request.workspaceId)) break;
-      if (!matches(tab.pendingUrl, request.workspaceId) && (navigationFrom === undefined || tab.url !== navigationFrom))
-        throw new Error('请先在 Chrome 中登录 OpenMarket 并打开配置的四屏布局 / OpenMarket login required');
+    const keeper = await chrome.tabs.get(tab.id);
+    if (!matches(tabAddress(keeper), request.workspaceId)) throw new Error('The chart tab navigated away; retry');
+    let duplicate;
+    try { duplicate = await chrome.tabs.get(candidate.id); } catch { continue; }
+    if (!duplicate.incognito && matches(duplicate.url, request.workspaceId) && matches(tabAddress(duplicate), request.workspaceId)) {
+      await chrome.tabs.remove(duplicate.id);
+      closedDuplicates++;
     }
-    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  // Old copies can retain different chart state. Reconnect the survivor to its saved layout once.
+  if (closedDuplicates > 0) {
+    checkRequest(request);
+    await chrome.tabs.reload(tab.id);
+    // Loading the page is distinct from its live connection, verified by BrimDeck afterwards.
+    tab = await waitForChart(chrome, request, tab.id);
   }
   checkRequest(request);
   const nativeMarker = ` [BrimDeck-${request.id}]`;
@@ -96,10 +114,13 @@ export async function prepareChart(chrome, request) {
   await chrome.tabs.update(tab.id, { active: true });
   checkRequest(request);
   await chrome.windows.update(windowId, { focused: true });
+  // The page elects the last focused chart tab for agent workspace changes. Windows may
+  // refuse scheduled foreground activation even after Chrome selected the correct tab.
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'ISOLATED', func: notifyChartFocus });
   tab = await chrome.tabs.get(tab.id);
   if (!matches(tab.url, request.workspaceId)) throw new Error('The chart tab navigated away; retry');
   const singleTab = (await chrome.tabs.query({ windowId })).length === 1;
-  return { protocolVersion: 4, nativeMarker, tabId: tab.id, windowId, singleTab, title: tab.title, url: tab.url, state: (await chrome.windows.get(windowId)).state };
+  return { protocolVersion: 4, nativeMarker, tabId: tab.id, windowId, singleTab, closedDuplicates, title: tab.title, url: tab.url, state: (await chrome.windows.get(windowId)).state };
 }
 
 export async function setChartWindowState(chrome, request) {
@@ -113,11 +134,14 @@ export async function setChartWindowState(chrome, request) {
   for (;;) {
     checkRequest(request, 'window_state');
     window = await chrome.windows.get(request.windowId);
-    if (window.state === request.state) return { protocolVersion: 4, windowId: request.windowId, tabId: request.tabId, state: window.state };
+    if (window.state === request.state) {
+      await chrome.scripting.executeScript({ target: { tabId: request.tabId }, world: 'ISOLATED', func: notifyChartFocus });
+      return { protocolVersion: 4, windowId: request.windowId, tabId: request.tabId, state: window.state };
+    }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 }
-import { updateWindowMarker } from './window-marker.mjs';
+import { updateWindowMarker, notifyChartFocus } from './window-marker.mjs';
 
 
 export async function releaseChartWindowMarker(chrome, request) {

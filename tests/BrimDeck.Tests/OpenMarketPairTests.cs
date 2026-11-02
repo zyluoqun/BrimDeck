@@ -11,6 +11,9 @@ internal static class OpenMarketPairTests
         var client = new OpenMarketChartClient(http, "test-token", "pair123");
         check("The countdown resolves the exact named workspace instead of the four-pane workspace",
             await client.ResolveWorkspaceAsync("BTC&ETH", default) == "pair123");
+        var catalog = new OpenMarketChartClient(http, "test-token", "catalog");
+        check("The countdown can resolve its workspace before a capsule target is selected",
+            await catalog.ResolveWorkspaceAsync("BTC&ETH", default) == "pair123" && handler.Writes.Count == 0);
         handler.Names = ["BTC&ETH", "BTC&ETH"];
         bool rejected = false;
         try { await client.ResolveWorkspaceAsync("BTC&ETH", default); } catch (InvalidOperationException) { rejected = true; }

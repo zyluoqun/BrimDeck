@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { updateWindowMarker } from '../../extensions/brimdeck-chart/window-marker.mjs';
+import { updateWindowMarker, notifyChartFocus } from '../../extensions/brimdeck-chart/window-marker.mjs';
 
 function page() {
-  const observers = new Set(), timers = new Map();
+  const observers = new Set(), timers = new Map(), delays = [];
   let title = '1.00 ETHUSDT', queued = false, nextTimer = 0;
   const document = { head: {}, get title() { return title; }, set title(value) {
     title = value;
@@ -19,12 +19,12 @@ function page() {
     disconnect() { observers.delete(this); }
   }
   const context = vm.createContext({ document, MutationObserver: Observer,
-    setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id) });
-  function run(marker, clear = false) {
-    context.args = [marker, Date.now() + 10000, clear];
+    setTimeout: (callback, delay) => { delays.push(delay); timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id) });
+  function run(marker, clear = false, expiresIn = 10000) {
+    context.args = [marker, Date.now() + expiresIn, clear];
     return vm.runInContext(`(${updateWindowMarker.toString()})(...args)`, context);
   }
-  return { document, run, observers, timers };
+  return { document, run, observers, timers, delays };
 }
 const settle = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 
@@ -55,4 +55,19 @@ test('the temporary marker expires even when the native request is interrupted',
   [...p.timers.values()][0](); await settle();
   assert.equal(p.document.title, '1.02 ETHUSDT');
   assert.equal(p.observers.size, 0);
+});
+
+test('the marker survives slow window preparation but remains bounded by the request deadline', () => {
+  const p = page();
+  p.run(' [BrimDeck-slow]', false, 25000);
+  assert.ok(p.delays[0] > 24000 && p.delays[0] <= 25000);
+  p.run(' [BrimDeck-bounded]', false, 60000);
+  assert.equal(p.delays[1], 30000);
+});
+
+test('scheduled preparation notifies the page focus recorder without relying on OS foreground focus', () => {
+  const events = [];
+  const context = vm.createContext({ window: { dispatchEvent: event => events.push(event.type) }, Event: class { constructor(type) { this.type = type; } } });
+  vm.runInContext(`(${notifyChartFocus.toString()})()`, context);
+  assert.deepEqual(events, ['focus']);
 });

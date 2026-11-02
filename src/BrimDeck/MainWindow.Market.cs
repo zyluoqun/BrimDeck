@@ -11,6 +11,7 @@ public partial class MainWindow
     private TimeSpan _marketElapsed;
     private string? _marketSelectionRendered;
     private MarketPageView? _marketPageView;
+    private double _marketFaceRendered;
     private bool IsMarketPage => CurrentPage == DeckPage.Market;
     private bool MarketSummaryActive => EffectiveStyle != CompactStyle.Line && Settings.ShowsMarket(EffectiveStyle);
     internal bool MarketDemand => IsVisible && !IsSuppressed && (_expanded ? IsMarketPage : Settings.ShowsMarket(EffectiveStyle));
@@ -36,7 +37,13 @@ public partial class MainWindow
     }
     private void UpdateMarketStrip()
     {
-        if (MarketSummaryActive) _marketStrip?.Update(_app.Market, Settings, _app.MarketError);
+        if (MarketSummaryActive)
+        {
+            _marketStrip?.Update(_app.Market, Settings, _app.MarketError);
+            if (_marketStrip is not null && Settings.CompactAutoWidth(EffectiveStyle) && _app.PendingChartCoins.Count == 0
+                && Math.Abs(CompactMarketWidth(CompactMusicLayout.SafeScale(Collapsed.Scale)) - _marketFaceRendered) > .5)
+                RenderCompact();
+        }
         _marketPageView?.Update(_app.Market, Settings.MarketRanking, _app.MarketError, _app.MarketChartStatus, Settings.MarketCount(Settings.MarketRanking));
         if (IsMarketPage)
         {
@@ -45,6 +52,9 @@ public partial class MainWindow
         }
         UpdateMarketIndicator();
     }
+    private double CompactMarketWidth(double scale) => !MarketSummaryActive ? 0 : Settings.CompactAutoWidth(EffectiveStyle)
+        ? MarketTickerStrip.PreferredWidth(_app.Market, Settings, scale, _app.MarketError)
+        : CompactMusicLayout.Whole(CompactMusicLayout.MarketSlot * scale);
     private MarketTickerStrip CreateMarketStrip(double width, double rowHeight, double scale)
     {
         string selection = string.Join('|', Settings.SelectedMarketRankings.Select(ranking => $"{ranking}:{Settings.MarketCount(ranking)}"));

@@ -69,7 +69,7 @@ public sealed partial class SettingsWindow
         if (style != CompactStyle.Line)
         {
             Group(MarketRankingChoice(),
-                TextLine(Loc.T("行情区域悬停暂停滚动，不展开面板。点击币种依次切换网页下方三屏，默认 4h；其他区域保持悬停展开。", "Hovering market data pauses scrolling without expanding. Click a coin to rotate through the three lower browser charts at 4h; other areas retain hover expansion."), 11, TextSecondary));
+                TextLine(Loc.T("行情区域悬停暂停滚动，不展开面板。点击币种按方案所选周期依次切换未固定的图表；其他区域保持悬停展开。", "Hovering market data pauses scrolling without expanding. Click a coin to rotate through unpinned charts using the workspace's interval; other areas retain hover expansion."), 11, TextSecondary));
         }
     }
     private const double PartRowHeight = 44, PartHandleWidth = 40;

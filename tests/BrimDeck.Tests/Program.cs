@@ -15,6 +15,7 @@ try
 {
     await MarketFeedTests.Run(Check);
     MarketDisplayTests.Run(Check);
+    ChartLayoutTests.Run(Check);
     await OpenMarketChartTests.Run(Check);
     await OpenMarketPairTests.Run(Check);
     await ChromeChartProtocolTests.Run(Check);

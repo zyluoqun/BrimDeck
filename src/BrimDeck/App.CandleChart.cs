@@ -20,8 +20,7 @@ public partial class App
             var connection = ChartConnection;
             if (connection.Token.Length == 0) throw new InvalidOperationException(Loc.T("请先在设置 → 市场行情中配置图表联动。", "Configure the chart connection under Settings → Market first."));
             step = "resolve workspace";
-            var catalog = new OpenMarketChartClient(_chartHttp, connection.Token, connection.WorkspaceId, LogChartRequest);
-            string workspace = await catalog.ResolveWorkspaceAsync("BTC&ETH", deadline.Token);
+            string workspace = await ResolveCandleChartWorkspaceAsync(connection.Token, deadline.Token);
             MarketChartStatus = Loc.T($"正在打开 BTC&ETH · {CandleCountdown.Label(period)}…", $"Opening BTC&ETH · {CandleCountdown.Label(period)}…"); MarketUpdated?.Invoke();
             step = "prepare Chrome window";
             _chromeCharts ??= new Native.ChromeChartBridge(diagnostic: LogChartRequest);
@@ -45,6 +44,23 @@ public partial class App
         {
             if (acquired) _chartOperationGate.Release();
             if (!Exiting) MarketUpdated?.Invoke();
+        }
+    }
+
+    private async Task<string> ResolveCandleChartWorkspaceAsync(string token, CancellationToken cancellation)
+    {
+        // Only repeat the read-only preflight within the caller's 90-second deadline.
+        // Replaying the whole action could duplicate chart mutations after a lost reply.
+        var catalog = new OpenMarketChartClient(_chartHttp, token, "catalog", LogChartRequest);
+        while (true)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try { return await catalog.ResolveWorkspaceAsync("BTC&ETH", cancellation); }
+            catch (ChartConnectionException ex) when (ex.IsTransient && !cancellation.IsCancellationRequested)
+            {
+                LogChartRequest("Countdown workspace connection unavailable; retrying preflight");
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellation);
+            }
         }
     }
 }

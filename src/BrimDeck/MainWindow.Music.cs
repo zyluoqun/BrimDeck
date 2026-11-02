@@ -882,7 +882,7 @@ public partial class MainWindow
         var shape = Collapsed; _compactRendered = shape;
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double contentWidth = CompactContentWidth(shape);
-        double marketFace = MarketSummaryActive ? CompactMusicLayout.Whole(CompactMusicLayout.MarketSlot * scale) : 0;
+        double marketFace = _marketFaceRendered = CompactMarketWidth(scale);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool equalizer = CompactEqualizerShown;
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;

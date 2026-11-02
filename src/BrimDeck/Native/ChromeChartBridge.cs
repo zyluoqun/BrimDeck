@@ -89,6 +89,8 @@ internal sealed class ChromeChartBridge : IDisposable
             if (!result.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
                 throw new InvalidOperationException(result.TryGetProperty("error", out var error) ? error.GetString() : "Chrome chart window failed.");
             windowId = result.GetProperty("windowId").GetInt32(); tabId = result.GetProperty("tabId").GetInt32();
+            _diagnostic?.Invoke($"Chrome prepared workspace={workspaceId} tab={tabId} window={windowId} closedDuplicates="
+                + (result.TryGetProperty("closedDuplicates", out var duplicates) ? duplicates.ToString() : "unknown"));
             windowIdentity = WindowIdentity(result);
             bool wasFullscreen = result.TryGetProperty("state", out var state) && state.GetString() == "fullscreen";
             bool onTarget = await ChromeChartPlacement.IsOnDisplayAsync(display, windowIdentity, deadline.Token, _diagnostic).ConfigureAwait(false);

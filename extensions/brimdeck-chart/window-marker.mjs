@@ -22,6 +22,11 @@ export function updateWindowMarker(marker, expiresAt, clear = false) {
   globalThis[key] = state;
   observer.observe(document.head || document.documentElement, { subtree: true, childList: true, characterData: true });
   document.title += marker;
-  timer = setTimeout(state.release, Math.max(1, Math.min(10000, expiresAt - Date.now())));
+  timer = setTimeout(state.release, Math.max(1, Math.min(30000, expiresAt - Date.now())));
   return true;
+}
+
+// Notify the chart's focus listeners after Chrome selects the tab, including scheduled requests.
+export function notifyChartFocus() {
+  window.dispatchEvent(new Event('focus'));
 }

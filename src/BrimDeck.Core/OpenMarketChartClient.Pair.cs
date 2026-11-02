@@ -17,6 +17,7 @@ public sealed partial class OpenMarketChartClient
         await InitializeSessionAsync(cancellation).ConfigureAwait(false);
         // Clients sharing a token also share the service's active workspace. Another operation may have moved it.
         await CallAsync("chart_workspace_select", new { workspaceId = _workspace }, cancellation).ConfigureAwait(false);
+        diagnostic?.Invoke($"workspace selected id={_workspace}");
     }
     public async Task<string> ResolveWorkspaceAsync(string name, CancellationToken cancellation)
     {

@@ -30,6 +30,20 @@ internal sealed class MarketTickerStrip : Grid
     private bool _running = true, _pointerPause;
     private readonly Func<MarketCoin, Task>? _switchChart;
     public TimeSpan Elapsed => _clock?.CurrentTime ?? _elapsed;
+    // Keep the capsule compact: reserve one window of six coins, not the entire ranking.
+    internal static double PreferredWidth(MarketFeedSnapshot snapshot, DeckSettings settings, double scale, string? error)
+    {
+        var rows = error is null ? snapshot.DisplayRows(settings).Take(6).ToArray() : [];
+        return rows.Length == 0 ? CompactMusicLayout.Whole(CompactMusicLayout.MarketSlot * scale)
+            : rows.Sum(entry => ReservedTextWidth(entry, scale) + 16 * scale);
+    }
+    private static double ReservedTextWidth(MarketDisplayCoin entry, double scale)
+    {
+        var measure = new TextBlock { Text = entry.Rank.ToString(CultureInfo.InvariantCulture) + "." + entry.Coin.Asset + " +0000.00%",
+            FontSize = 12 * scale, FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI") };
+        measure.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return Math.Ceiling(measure.DesiredSize.Width) + 31 * scale;
+    }
     public MarketTickerStrip(double width, double height, double scale, bool animations, TimeSpan elapsed = default, Func<MarketCoin, Task>? switchChart = null)
     {
         _switchChart = switchChart; ToolTipService.SetIsEnabled(this, false);
@@ -59,8 +73,7 @@ internal sealed class MarketTickerStrip : Grid
         _snapshot = snapshot; _settings = settings; _error = error;
         var rows = error is null ? snapshot.DisplayRows(settings) : [];
         var problem = error ?? (rows.Count == 0 ? settings.SelectedMarketRankings.Select(snapshot.BoardError).FirstOrDefault(value => value is not null) : null);
-        bool headings = settings.SelectedMarketRankings.Count > 1;
-        string key = headings + "|" + string.Join("|", rows.Select(row => $"{row.Ranking}:{row.Coin.Symbol}:{row.Coin.Perpetual}")) + "|" + problem + "|" + settings.SelectedMarketRankings.Count;
+        string key = string.Join("|", rows.Select(row => $"{row.Ranking}:{row.Coin.Symbol}:{row.Coin.Perpetual}")) + "|" + problem + "|" + settings.SelectedMarketRankings.Count;
         if (_key != key && _pending.Count == 0)
         {
             if (_key.Length > 0) _elapsed = TimeSpan.Zero;
@@ -77,12 +90,7 @@ internal sealed class MarketTickerStrip : Grid
             {
                 void AddCycle()
                 {
-                    foreach (var entry in rows)
-                    {
-                        if (headings && entry.Rank == 1) _row.Children.Add(new TextBlock { Text = MarketPageView.Label(entry.Ranking),
-                            Foreground = UI.Brush(UI.Secondary), FontSize = 11 * _scale, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8 * _scale, 0, 8 * _scale, 0) });
-                        AddCoin(entry);
-                    }
+                    foreach (var entry in rows) AddCoin(entry);
                 }
                 AddCycle();
                 _row.Measure(new Size(double.PositiveInfinity, Height));
@@ -120,21 +128,38 @@ internal sealed class MarketTickerStrip : Grid
             FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"), Foreground = UI.Brush(UI.Primary) };
         var ring = new MarketLoadingRing(_scale); ring.SetLoading(_pending.Contains((coin.Symbol, coin.Perpetual)));
         text.Inlines.Add(new InlineUIContainer(ring) { BaselineAlignment = BaselineAlignment.Center });
+        text.Inlines.Add(new InlineUIContainer(RankingIcon(entry.Ranking)) { BaselineAlignment = BaselineAlignment.Center });
         text.Inlines.Add(new Run(rank.ToString(CultureInfo.InvariantCulture) + ".") { Foreground = UI.Brush(UI.Secondary), FontWeight = FontWeights.Normal });
         text.Inlines.Add(new Run(coin.Asset + " ")); text.Inlines.Add(value);
         // Reserve the percentage before measuring the animation cycle, including while quotes are unavailable.
-        var measure = new TextBlock { Text = rank + "." + coin.Asset + " +0000.00%", FontSize = text.FontSize, FontWeight = text.FontWeight, FontFamily = text.FontFamily };
-        measure.Measure(new Size(double.PositiveInfinity, Height));
-        text.MinWidth = Math.Ceiling(measure.DesiredSize.Width) + 15 * _scale;
+        text.MinWidth = ReservedTextWidth(entry, _scale);
         var template = new ControlTemplate(typeof(Button));
         var content = new FrameworkElementFactory(typeof(ContentPresenter)); template.VisualTree = content;
         var button = new Button { Content = text, Template = template, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             Padding = new Thickness(0), Margin = new Thickness(8 * _scale, 0, 8 * _scale, 0), Height = Height,
             Cursor = Cursors.Hand, FocusVisualStyle = null };
-        System.Windows.Automation.AutomationProperties.SetName(button, coin.Asset + Loc.T("，打开图表", ", open chart"));
+        System.Windows.Automation.AutomationProperties.SetName(button, MarketPageView.Label(entry.Ranking) + ", " + coin.Asset + Loc.T("，打开图表", ", open chart"));
         ToolTipService.SetIsEnabled(button, false);
         button.Click += async (_, _) => { if (_switchChart is not null) await _switchChart(coin); };
         _values.Add((entry, value, button, ring)); _row.Children.Add(button);
+    }
+    private FrameworkElement RankingIcon(MarketRanking ranking)
+    {
+        var (data, color) = ranking switch
+        {
+            MarketRanking.Pool => ("M 1,6 Q 6,-1 11,6 Q 6,13 1,6 Z M 8,6 A 2,2 0 1 1 4,6 A 2,2 0 1 1 8,6", UI.Secondary),
+            MarketRanking.Gainers => ("M 6,11 V 1 M 2,5 L 6,1 L 10,5", "#36D399"),
+            MarketRanking.Losers => ("M 6,1 V 11 M 2,7 L 6,11 L 10,7", "#FB7185"),
+            _ => ("M 6,1 C 7,4 10,4 10,7 A 4,4 0 0 1 2,7 C 2,5 3,4 4,3 C 4,5 5,6 6,5 C 7,4 6,2 6,1 Z", "#FBBF24")
+        };
+        bool arrow = ranking is MarketRanking.Gainers or MarketRanking.Losers;
+        double size = (arrow ? 8 : 12) * _scale;
+        var icon = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Width = size, Height = size,
+            Stretch = Stretch.Uniform, Stroke = UI.Brush(color), StrokeThickness = (arrow ? 1 : 1.3) * _scale,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round,
+            Margin = new Thickness((arrow ? 2 : 0) * _scale, 0, (arrow ? 6 : 4) * _scale, 0), IsHitTestVisible = false };
+        System.Windows.Automation.AutomationProperties.SetName(icon, MarketPageView.Label(ranking));
+        return icon;
     }
     internal void SetPending(IEnumerable<MarketCoin> coins)
     {

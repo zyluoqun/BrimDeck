@@ -12,18 +12,22 @@ internal sealed record OpenMarketChartConnection(string WorkspaceId, string Toke
     internal static OpenMarketChartConnection Load(string directory)
     {
         string config = Path.Combine(directory, ConfigFile), secret = Path.Combine(directory, TokenFile);
-        if (!File.Exists(config) || !File.Exists(secret)) return new("", "");
-        using var document = JsonDocument.Parse(File.ReadAllText(config));
-        if (!document.RootElement.TryGetProperty("workspaceId", out var id) || id.ValueKind != JsonValueKind.String)
-            throw new ArgumentException(Loc.T("图表联动配置缺少布局 ID，请重新保存配置", "Chart connection has no workspace ID; save the configuration again"));
-        string workspace = OpenMarketChartClient.ParseWorkspace(id.GetString() ?? "");
+        if (!File.Exists(secret)) return new("", "");
+        string workspace = "";
+        if (File.Exists(config))
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(config));
+            if (!document.RootElement.TryGetProperty("workspaceId", out var id) || id.ValueKind != JsonValueKind.String)
+                throw new ArgumentException(Loc.T("图表联动配置缺少布局 ID，请重新保存配置", "Chart connection has no workspace ID; save the configuration again"));
+            if (id.GetString() is { Length: > 0 } value) workspace = OpenMarketChartClient.ParseWorkspace(value);
+        }
         byte[] plain = ProtectedData.Unprotect(File.ReadAllBytes(secret), null, DataProtectionScope.CurrentUser);
         try { return new(workspace, Encoding.UTF8.GetString(plain)); }
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
     internal static void Save(string directory, string workspace, string token)
     {
-        workspace = OpenMarketChartClient.ParseWorkspace(workspace);
+        workspace = workspace.Trim().Length == 0 ? "" : OpenMarketChartClient.ParseWorkspace(workspace);
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, TokenFile);
         if (!string.IsNullOrWhiteSpace(token))

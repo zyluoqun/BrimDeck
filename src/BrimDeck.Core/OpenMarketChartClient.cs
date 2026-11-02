@@ -12,6 +12,7 @@ public sealed record ChartSwitchResult(int ChartIndex, bool Loaded);
 public sealed class ChartConnectionException(string operation, int? statusCode, bool timedOut, Exception cause)
     : InvalidOperationException(MessageFor(operation, statusCode, timedOut), cause)
 {
+    public bool IsTransient => statusCode is null or 408 or 429 or 502 or 503 or 504;
     private static string MessageFor(string operation, int? code, bool timedOut)
     {
         string step = operation switch {
@@ -25,12 +26,12 @@ public sealed class ChartConnectionException(string operation, int? statusCode, 
 }
 
 // One connection and rotation are shared by every deck and by both market controls.
-// Every mutation names the configured workspace and a lower pane; no browser navigation is involved.
+// Every mutation names the configured workspace and a confirmed, unpinned pane.
 public sealed partial class OpenMarketChartClient(HttpClient http, string token, string workspaceId, Action<string>? diagnostic = null)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _workspace = ParseWorkspace(workspaceId);
-    private int _nextPane = 1, _request;
+    private int _nextPane, _request;
     private string? _session;
     public static string ParseWorkspace(string value)
     {
@@ -45,23 +46,30 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
             throw new ArgumentException(Loc.T("OpenMarket 布局 ID 无效", "Invalid OpenMarket workspace ID"));
         return value;
     }
-    public async Task<ChartSwitchResult> SwitchAsync(MarketCoin coin, CancellationToken cancellation, IReadOnlyCollection<int>? pinnedPanes = null)
+    public async Task<ChartSwitchResult> SwitchAsync(MarketCoin coin, CancellationToken cancellation, ChartRotationSettings rotation)
     {
         _ = MarketCoin.ChartUrl(coin.Symbol, coin.Perpetual);
-        var pinned = (pinnedPanes ?? []).Distinct().ToArray();
-        if (pinned.Length > 2 || pinned.Any(pane => pane is < 1 or > 3))
-            throw new ArgumentException(Loc.T("只能固定下方窗口 1、2、3，且最多固定两个", "Pin at most two of the lower panes 1, 2 and 3"), nameof(pinnedPanes));
+        var pinned = (rotation.PinnedPanes ?? []).Distinct().ToArray();
+        string interval = ChartIntervals.Normalize(rotation.Interval);
         await _gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
             await SelectWorkspaceAsync(cancellation).ConfigureAwait(false);
             await WaitForPageAsync(cancellation).ConfigureAwait(false);
             var state = await CallAsync("chart_refresh", new { workspaceId = _workspace, full = true }, cancellation).ConfigureAwait(false);
-            ValidateLayout(state);
-            int pane = _nextPane;
-            while (pinned.Contains(pane)) pane = pane == 3 ? 1 : pane + 1;
-            diagnostic?.Invoke($"switch begin pane={pane} market={(coin.Perpetual ? "BINANCE_FUTURES" : "BINANCE")}:{coin.Symbol} interval=4h");
-            await CallAsync("chart_interval", new { workspaceId = _workspace, chartIndex = pane, interval = "4h" }, cancellation).ConfigureAwait(false);
+            var layout = ChartLayout.Parse(state, _workspace);
+            // With no pinned charts there are no saved pane positions to protect. Use the live layout.
+            if (!rotation.AcceptsLayout(layout))
+                throw new InvalidOperationException(Loc.T("方案布局尚未确认或已发生变化。请在行情设置中重新检测布局、确认固定图表后再切换。", "The workspace layout is unconfirmed or has changed. Detect the layout and confirm its pinned charts in market settings before switching."));
+            if (pinned.Any(pane => pane < 0 || pane >= layout.Panes.Count))
+                throw new ArgumentException(Loc.T("固定图表不在当前布局中，请重新确认。", "A pinned chart is outside this layout; confirm the layout again."), nameof(rotation));
+            var available = layout.Panes.Select(p => p.Index).Except(pinned).ToArray();
+            if (available.Length == 0) throw new InvalidOperationException(Loc.T("此方案的图表已全部固定，切换已暂停。请先取消固定至少一张图表。", "All charts in this workspace are pinned. Unpin at least one to resume switching."));
+            if (layout.Panes.Count > 1 && (layout.SymbolSync || layout.IntervalSync))
+                throw new InvalidOperationException(Loc.T("请先在网页关闭此方案的币种同步和周期同步，避免联动修改其他图表。", "Turn off symbol and interval sync in this workspace before switching to avoid changing other charts."));
+            int pane = available.FirstOrDefault(p => p >= _nextPane, available[0]);
+            diagnostic?.Invoke($"switch begin pane={pane} market={(coin.Perpetual ? "BINANCE_FUTURES" : "BINANCE")}:{coin.Symbol} interval={interval}");
+            await CallAsync("chart_interval", new { workspaceId = _workspace, chartIndex = pane, interval }, cancellation).ConfigureAwait(false);
             JsonElement changed;
             try
             {
@@ -71,9 +79,9 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
             catch (ChartConnectionException)
             {
                 // A lost acknowledgement does not prove a failed mutation. Read the same pane back before advancing.
-                if (!await ConfirmSwitchAsync(pane, coin, cancellation).ConfigureAwait(false)) throw;
+                if (!await ConfirmSwitchAsync(pane, coin, cancellation, interval).ConfigureAwait(false)) throw;
                 diagnostic?.Invoke($"chart_symbol acknowledgement recovered pane={pane}");
-                _nextPane = pane == 3 ? 1 : pane + 1;
+                _nextPane = (pane + 1) % layout.Panes.Count;
                 return new(pane, true);
             }
             if (changed.TryGetProperty("load", out var load))
@@ -83,12 +91,12 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
                 if (loadState is "empty" or "error") throw new InvalidOperationException(Loc.T("目标图表未能加载行情，请检查网页后重试", "The pane could not load this market; check the page and retry"));
             }
             // A loaded report alone does not verify both the market and interval in the live browser tab.
-            if (!await ConfirmSwitchAsync(pane, coin, cancellation).ConfigureAwait(false))
+            if (!await ConfirmSwitchAsync(pane, coin, cancellation, interval).ConfigureAwait(false))
             {
                 diagnostic?.Invoke($"switch unconfirmed pane={pane}; rotation retained");
                 throw PageNotReady();
             }
-            _nextPane = pane == 3 ? 1 : pane + 1;
+            _nextPane = (pane + 1) % layout.Panes.Count;
             return new(pane, true);
         }
         finally { _gate.Release(); }
@@ -158,28 +166,7 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
             { workspace = item; return true; }
         return false;
     }
-    private static InvalidOperationException PageNotReady() => new(Loc.T("已等待网页连接恢复，但实时连接仍未就绪或尚未确认执行。请切回已打开的四屏网页，必要时刷新后重试；轮换位置已保留。", "Waited for the chart page to recover, but its live connection is still unavailable or execution is unconfirmed. Return to the existing four-pane page; refresh it if needed, then retry. The rotation position is retained."));
-    private void ValidateLayout(JsonElement state)
-    {
-        bool valid = Text(state, "workspaceId") == _workspace && state.TryGetProperty("workspace", out var workspace)
-            && workspace.TryGetProperty("multiCharts", out var charts) && Text(charts, "mode") == "4";
-        if (!valid) throw BadLayout();
-        var multi = state.GetProperty("workspace").GetProperty("multiCharts");
-        if (!multi.TryGetProperty("layout", out var layout) || !layout.TryGetProperty("cells", out var cells) || cells.ValueKind != JsonValueKind.Array
-            || cells.GetArrayLength() != 4 || Number(layout, "cols") != 3 || Number(layout, "rows") != 2)
-            throw BadLayout();
-        for (int i = 0; i < 4; i++)
-        {
-            var cell = cells[i];
-            if (Number(cell, "col") != (i == 0 ? 0 : i - 1) || Number(cell, "row") != (i == 0 ? 0 : 1)
-                || Number(cell, "colSpan") != (i == 0 ? 3 : 1) || Number(cell, "rowSpan") != 1)
-                throw BadLayout();
-        }
-        if (!multi.TryGetProperty("syncStatus", out var sync) || !sync.TryGetProperty("symbol", out var symbolSync) || symbolSync.ValueKind != JsonValueKind.False
-            || !sync.TryGetProperty("interval", out var intervalSync) || intervalSync.ValueKind != JsonValueKind.False)
-            throw new InvalidOperationException(Loc.T("请先关闭四屏布局的币种同步和周期同步，以保持上方图表不变", "Turn off symbol and interval sync in this workspace to keep the top chart unchanged"));
-    }
-    private static InvalidOperationException BadLayout() => new(Loc.T("目标布局需为上方一屏、下方三屏；请检查网页布局", "The target layout must have one chart above three charts; check the page layout"));
+    private static InvalidOperationException PageNotReady() => new(Loc.T("已等待网页连接恢复，但实时连接仍未就绪或尚未确认执行。请切回已打开的目标方案网页，必要时刷新后重试；轮换位置已保留。", "Waited for the chart page to recover, but its live connection is still unavailable or execution is unconfirmed. Return to the existing chart workspace; refresh it if needed, then retry. The rotation position is retained."));
     private async Task<JsonElement> CallAsync(string name, object arguments, CancellationToken cancellation)
     {
         var result = await RpcAsync("tools/call", new { name, arguments }, cancellation).ConfigureAwait(false);
@@ -204,7 +191,7 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
             diagnostic?.Invoke($"{name} refused code={code} message={detail}");
             if (name == "chart_symbol" && code == "VALIDATION" && detail.Contains("symbol must be alphanumeric", StringComparison.OrdinalIgnoreCase)
                 && Text(JsonSerializer.SerializeToElement(arguments), "symbol").Any(c => c > 127))
-                throw new InvalidOperationException(Loc.T("OpenMarket 的切币接口暂不接受中文交易对，请在四屏网页中手动选择该币种；轮换位置已保留。", "OpenMarket's chart-switch API currently rejects non-English symbols. Select this market in the chart page; the rotation position is retained."));
+                throw new InvalidOperationException(Loc.T("OpenMarket 的切币接口暂不接受中文交易对，请在目标方案网页中手动选择该币种；轮换位置已保留。", "OpenMarket's chart-switch API currently rejects non-English symbols. Select this market in the chart page; the rotation position is retained."));
             throw new InvalidOperationException(code.Length + detail.Length == 0
                 ? Loc.T("OpenMarket 拒绝了图表操作，请检查授权和网页状态", "OpenMarket refused the chart operation; check authorization and the page")
                 : Loc.T($"OpenMarket 拒绝图表操作（{code}）：{detail}", $"OpenMarket refused the chart operation ({code}): {detail}"));
@@ -226,7 +213,11 @@ public sealed partial class OpenMarketChartClient(HttpClient http, string token,
                 if (attempt > 0)
                     await Task.Delay(TimeSpan.FromMilliseconds(500 * (1 << (attempt - 1))), deadline.Token).ConfigureAwait(false);
                 timer.Restart();
-                var result = await RpcOnceAsync(method, parameters, deadline.Token).ConfigureAwait(false);
+                // A hung connection must leave time for a fresh attempt within the total budget.
+                // Writes retain their full timeout and are never replayed automatically.
+                using var attemptDeadline = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                if (retryable) attemptDeadline.CancelAfter(TimeSpan.FromSeconds(6));
+                var result = await RpcOnceAsync(method, parameters, attemptDeadline.Token).ConfigureAwait(false);
                 diagnostic?.Invoke($"{operation} attempt={attempt + 1} ok elapsedMs={timer.ElapsedMilliseconds}");
                 return result;
             }

@@ -15,8 +15,6 @@ public partial class App
     internal event Action? MarketUpdated;
     private readonly HttpClient _chartHttp = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
     private readonly object _chartLogGate = new();
-    private string? _lastChartNotice;
-    private DateTimeOffset _chartNoticeAfter;
     private void LogChartRequest(string message)
     {
         try
@@ -41,41 +39,52 @@ public partial class App
     internal void ConfigureMarketChart(string workspace, string token)
     {
         Native.OpenMarketChartConnection.Save(Store.DirectoryPath, workspace, token); _chartClient = null;
-        MarketChartStatus = Loc.T("图表联动已配置 · 默认 4h", "Chart connection configured · default 4h"); MarketUpdated?.Invoke();
+        MarketChartStatus = Loc.T("图表联动已配置", "Chart connection configured"); MarketUpdated?.Invoke();
     }
-    internal async Task SwitchMarketChartAsync(MarketCoin coin)
+    internal Task SwitchMarketChartAsync(MarketCoin coin) => SwitchMarketChartAsync(coin, notice =>
+        System.Windows.MessageBox.Show(Deck, notice, Loc.T("图表切换未完成", "Chart switch incomplete"), System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information));
+    internal async Task SwitchMarketChartAsync(MarketCoin coin, Action<string> showNotice)
     {
         _pendingChartCoins.Add(coin); MarketChartActivityChanged?.Invoke();
         bool acquired = false;
+        string step = "queue";
         string? notice = null;
         try
         {
             await _chartOperationGate.WaitAsync(Lifetime.Token); acquired = true;
             var connection = ChartConnection;
+            if (!Settings.MarketChartWorkspaces.TryGetValue(connection.WorkspaceId, out var savedRotation) || savedRotation.LayoutSignature.Length == 0)
+                throw new InvalidOperationException(Loc.T("请先在行情设置中选择图表方案，检测布局并确认固定图表。", "Select a workspace, detect its layout and confirm its pinned charts in market settings first."));
+            var rotation = savedRotation.Copy();
             if (_chartClient is null)
             {
                 if (connection.Token.Length == 0) throw new InvalidOperationException(Loc.T("请先在设置 → 市场行情中配置图表联动", "Configure the chart connection under Settings → Market first"));
                 _chartClient = new OpenMarketChartClient(_chartHttp, connection.Token, connection.WorkspaceId, LogChartRequest);
             }
-            MarketChartStatus = Loc.T($"正在打开四屏并切换 {coin.Asset}…", $"Opening the chart and switching to {coin.Asset}…"); MarketUpdated?.Invoke();
+            MarketChartStatus = Loc.T($"正在打开 {rotation.Name} 并切换 {coin.Asset}…", $"Opening {rotation.Name} and switching to {coin.Asset}…"); MarketUpdated?.Invoke();
             _chromeCharts ??= new Native.ChromeChartBridge(diagnostic: LogChartRequest);
             var chartClient = _chartClient;
+            step = "verify workspace exists";
+            var targetWorkspace = (await chartClient.ListWorkspacesAsync(Lifetime.Token)).FirstOrDefault(workspace => workspace.Id == connection.WorkspaceId);
+            if (targetWorkspace is null)
+                throw new InvalidOperationException(Loc.T("所选图表方案已不存在，请在行情设置中重新选择。", "The selected workspace no longer exists; select another in market settings."));
+            rotation.Name = targetWorkspace.Name;
+            step = "prepare Chrome window";
+            LogChartRequest($"Market chart begin workspace={connection.WorkspaceId} symbol={coin.Symbol}");
             await _chromeCharts.EnsureAsync(connection.WorkspaceId, Lifetime.Token);
             // A queued click has not contacted the service yet. Only an active request has a timeout.
-            var result = await chartClient.SwitchAsync(coin, Lifetime.Token, Settings.MarketChartPinnedPanes);
-            _lastChartNotice = null; _chartNoticeAfter = default;
-            MarketChartStatus = Loc.T($"下方第 {result.ChartIndex} 屏 · {coin.Asset} · 4h · 网页已确认", $"Lower pane {result.ChartIndex} · {coin.Asset} · 4h · confirmed by the page");
+            step = "switch and confirm pane";
+            var result = await chartClient.SwitchAsync(coin, Lifetime.Token, rotation);
+            LogChartRequest($"Market chart completed workspace={connection.WorkspaceId} pane={result.ChartIndex} symbol={coin.Symbol}");
+            MarketChartStatus = Loc.T($"{rotation.Name} · 图 {result.ChartIndex + 1} · {coin.Asset} · {rotation.Interval} · 网页已确认", $"{rotation.Name} · Chart {result.ChartIndex + 1} · {coin.Asset} · {rotation.Interval} · confirmed by the page");
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or HttpRequestException or System.Text.Json.JsonException or System.Security.Cryptography.CryptographicException or OperationCanceledException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or System.Security.SecurityException)
         {
             if (Exiting) return;
             MarketChartStatus = ex is OperationCanceledException or HttpRequestException
                 ? Loc.T("图表联动连接超时或暂不可用，请检查网络和网页后重试", "Chart connection timed out or is unavailable; check the network and page, then retry") : ex.Message;
-            if (_lastChartNotice != MarketChartStatus || DateTimeOffset.UtcNow >= _chartNoticeAfter)
-            {
-                _lastChartNotice = MarketChartStatus; _chartNoticeAfter = DateTimeOffset.UtcNow.AddSeconds(30);
-                notice = MarketChartStatus;
-            }
+            LogChartRequest($"Market chart failed step={step}: {MarketChartStatus}");
+            notice = MarketChartStatus;
         }
         finally
         {
@@ -84,7 +93,7 @@ public partial class App
             if (!Exiting) { MarketChartActivityChanged?.Invoke(); MarketUpdated?.Invoke(); }
         }
         if (notice is not null && !Exiting)
-            System.Windows.MessageBox.Show(Deck, notice, Loc.T("图表切换未完成", "Chart switch incomplete"), System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            showNotice(notice);
     }
     private void StartMarketFeed()
     {
