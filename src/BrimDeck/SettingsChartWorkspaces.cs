@@ -200,7 +200,7 @@ public sealed partial class SettingsWindow
         buttons.Add(refresh); panel.Children.Add(refresh); panel.Children.Add(summaryRow); panel.Children.Add(rotationSummary); panel.Children.Add(layoutHost);
         confirm = ActionButton(Loc.T("确认布局并启用", "Confirm layout and enable"), SavePins); confirm.IsEnabled = false; buttons.Add(confirm); panel.Children.Add(confirm);
         panel.Children.Add(status);
-        panel.Children.Add(TextLine(Loc.T("布局数量、排列或图表身份变化后会暂停切换，需要重新检测并确认；全部固定时暂停切换。收盘倒计时的 BTC&ETH 联动独立运行。", "Changes to the chart count, arrangement or identity pause switching until reconfirmed. Pinning all charts pauses rotation. The BTC&ETH candle-close action remains independent."), 11, TextSecondary));
+        panel.Children.Add(TextLine(Loc.T("没有固定图表时自动跟随最新布局；有固定图表时，布局数量、排列或图表身份变化后需重新检测并确认。全部固定时暂停切换。收盘倒计时的 BTC&ETH 联动独立运行。", "Without pinned charts, switching follows the live layout. With pins, changes to the chart count, arrangement or identity require reconfirmation. Pinning all charts pauses rotation. The BTC&ETH candle-close action remains independent."), 11, TextSecondary));
         var extensionHint = TextLine(Loc.T("首次使用需在 Chrome 扩展管理中开启开发者模式，加载程序目录中的 chrome-extension 文件夹。", "First, enable Developer mode in Chrome extensions and load this app's chrome-extension folder."), 11, TextSecondary);
         extensionHint.Margin = new Thickness(0, 8, 0, 4); panel.Children.Add(extensionHint);
         panel.Children.Add(ActionButton(Loc.T("打开 Chrome 扩展文件夹", "Open Chrome extension folder"), () =>
