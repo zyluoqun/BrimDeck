@@ -17,7 +17,7 @@ public partial class MainWindow
     private void ApplyCapsuleWorkArea()
     {
         if (!IsLoaded) return;
-        if (!Settings.ReserveCapsuleSpace || Settings.Style != CompactStyle.Capsule || HiddenByUser)
+        if (!Settings.CapsuleAvoidanceEnabled || HiddenByUser)
         {
             _capsuleWorkArea?.Dispose(); _capsuleWorkArea = null;
             return;

@@ -37,5 +37,38 @@ internal static class WorkAreaReservationTests
         check("The compatibility choice survives save and reload", saved.ReserveCapsuleSpace);
         check("Existing settings retain the previous workspace behavior",
             !SettingsMigrations.Read("{}").ReserveCapsuleSpace);
+
+        foreach (var global in Enum.GetValues<WindowBehavior>())
+        foreach (var own in new WindowBehavior?[] { null, WindowBehavior.Normal, WindowBehavior.Line, WindowBehavior.Hide })
+        {
+            var rules = new DeckSettings
+            {
+                Style = CompactStyle.Capsule, ReserveCapsuleSpace = true,
+                Maximized = global, Borderless = WindowBehavior.Hide, Exclusive = WindowBehavior.Line,
+                FullscreenRules = [new FullscreenRule("test-app") { Maximized = own, Borderless = WindowBehavior.Line, Exclusive = WindowBehavior.Hide }]
+            };
+            check($"Avoidance keeps the capsule for global {global} and app override {own}",
+                rules.Behavior(ScreenContext.Maximized) == WindowBehavior.Normal
+                && rules.Behavior(ScreenContext.Maximized, "test-app") == WindowBehavior.Normal
+                && rules.Behavior(ScreenContext.BackgroundFullscreen, "test-app", backgroundKind: ScreenContext.Maximized) == WindowBehavior.Normal);
+            check("Avoidance preserves global and app-specific full-screen behavior",
+                rules.Behavior(ScreenContext.Borderless) == WindowBehavior.Hide && rules.Behavior(ScreenContext.Exclusive) == WindowBehavior.Line
+                && rules.Behavior(ScreenContext.Borderless, "test-app") == WindowBehavior.Line
+                && rules.Behavior(ScreenContext.Exclusive, "test-app") == WindowBehavior.Hide
+                && rules.Behavior(ScreenContext.BackgroundFullscreen, "test-app", backgroundKind: ScreenContext.Borderless) == WindowBehavior.Line);
+            check("Resolving avoidance never overwrites the saved choices", rules.Maximized == global && rules.FullscreenRules[0].Maximized == own);
+            var restored = SettingsMigrations.Read(JsonSerializer.Serialize(rules));
+            restored.ReserveCapsuleSpace = false;
+            check("Turning avoidance off after a reload restores both maximized rules",
+                restored.Behavior(ScreenContext.Maximized) == global && restored.Behavior(ScreenContext.Maximized, "test-app") == (own ?? global));
+            foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Line })
+            {
+                rules.Style = style;
+                check($"Switching to {style} restores the original maximized choices",
+                    rules.Behavior(ScreenContext.Maximized) == global && rules.Behavior(ScreenContext.Maximized, "test-app") == (own ?? global));
+            }
+            rules.Style = CompactStyle.Capsule;
+            check("Returning to the capsule reapplies the temporary maximized override", rules.Behavior(ScreenContext.Maximized, "test-app") == WindowBehavior.Normal);
+        }
     }
 }

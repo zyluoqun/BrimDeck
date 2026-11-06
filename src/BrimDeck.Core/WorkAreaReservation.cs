@@ -6,7 +6,7 @@ public static class WorkAreaReservation
     // so maximizing a window cannot change the reservation and then change that window's context again.
     public static int Height(DeckSettings settings, DipRect monitor, DipRect work, double pixelsPerDip)
     {
-        if (!settings.ReserveCapsuleSpace || settings.Style != CompactStyle.Capsule
+        if (!settings.CapsuleAvoidanceEnabled
             || !(pixelsPerDip > 0) || !double.IsFinite(pixelsPerDip)) return 0;
         var capsule = CollapsedGeometry.Resolve(settings, CompactStyle.Capsule, monitor, work, pixelsPerDip,
             panelScale: PanelScales.Factor(settings));

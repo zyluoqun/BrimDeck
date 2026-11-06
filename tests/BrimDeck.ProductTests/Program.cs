@@ -31,13 +31,15 @@ internal static class Program
             if (args is ["--chart-feedback"]) { Console.WriteLine($"{_checks} chart feedback checks passed."); return 0; }
             using var lyrics = new LyricsService();
             typeof(BrimDeck.App).GetProperty("Lyrics", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, lyrics);
+            app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);
+            CapsuleAvoidanceUiTests.Run(app, Check);
+            if (args is ["--capsule-avoidance"]) { Console.WriteLine($"{_checks} capsule avoidance UI checks passed."); return 0; }
             MarketAutoWidthUiTests.Run(app, Check);
             if (args is ["--market-auto-width"]) { Console.WriteLine($"{_checks} market auto-width checks passed."); return 0; }
             CheckChartCredential();
             ChromeExecutableTests.Run(Check);
             ChromeBridgeTests.Run(Check).GetAwaiter().GetResult();
             ChromeFocusTests.Run(Check).GetAwaiter().GetResult();
-            app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);
             ChartWorkspaceRecoveryUiTests.Run(app, Check);
             foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule })
             {

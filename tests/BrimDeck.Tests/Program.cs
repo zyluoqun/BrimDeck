@@ -13,6 +13,7 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    if (args is ["--only", "workarea"]) { WorkAreaReservationTests.Run(Check); return; }
     await MarketFeedTests.Run(Check);
     MarketDisplayTests.Run(Check);
     ChartLayoutTests.Run(Check);

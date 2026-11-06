@@ -166,8 +166,9 @@ public sealed partial class SettingsWindow
         row.Children.Add(remove);
         column.Children.Add(row);
         var picks = new StackPanel { Margin = new Thickness(26, 0, 0, 8) };
-        picks.Children.Add(RulePick(name, Loc.T("窗口最大化时", "Maximized"), rule.Maximized,
-            choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Maximized = choice }; })));
+        picks.Children.Add(RulePick(name, Loc.T("窗口最大化时", "Maximized"), S.CapsuleAvoidanceEnabled ? WindowBehavior.Normal : rule.Maximized,
+            choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Maximized = choice }; }),
+            enabled: !S.CapsuleAvoidanceEnabled));
         picks.Children.Add(RulePick(name, Loc.T("无边框全屏时", "Borderless full screen"), rule.Borderless,
             choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Borderless = choice }; })));
         picks.Children.Add(RulePick(name, Loc.T("独占全屏时", "Exclusive full screen"), rule.Exclusive,
@@ -177,9 +178,9 @@ public sealed partial class SettingsWindow
     }
 
     // One context's pick: the label, then a four-way segment — Follow and the three behaviours the global rules offer.
-    private FrameworkElement RulePick(string app, string title, WindowBehavior? selected, Action<WindowBehavior?> changed)
+    private FrameworkElement RulePick(string app, string title, WindowBehavior? selected, Action<WindowBehavior?> changed, bool enabled = true)
     {
-        var options = new UniformGrid { Columns = 4, Width = 428 };
+        var options = new UniformGrid { Columns = 4, Width = 428, IsEnabled = enabled };
         foreach (var choice in new (WindowBehavior? Value, string Label)[]
         {
             (null, Loc.T("跟随全局", "Follow")), (WindowBehavior.Normal, BehaviorName(WindowBehavior.Normal)),
@@ -192,7 +193,7 @@ public sealed partial class SettingsWindow
             option.Checked += (_, _) => changed(picked);
             options.Children.Add(option);
         }
-        return Row(title, SegmentBorder(options));
+        return Row(title, SegmentBorder(options), help: enabled ? null : () => CapsuleAvoidanceRuleHelp);
     }
 
     // Runs as the button's menu, so the menu is anchored to the button that opened it.

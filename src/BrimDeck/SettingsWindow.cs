@@ -689,7 +689,12 @@ public sealed partial class SettingsWindow : Window
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
+        var maximized = new Border();
+        void RefreshMaximized() => maximized.Child = BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"),
+            S.CapsuleAvoidanceEnabled ? WindowBehavior.Normal : S.Maximized, value => Change(s => s.Maximized = value),
+            enabled: !S.CapsuleAvoidanceEnabled, help: S.CapsuleAvoidanceEnabled ? CapsuleAvoidanceRuleHelp : null);
+        RefreshMaximized();
+        Group(maximized,
             BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value)),
             BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value)),
             Toggle(Loc.T("同时检测后方窗口", "Also check windows behind"), S.BackgroundWindows, value => Change(s => s.BackgroundWindows = value),
@@ -704,9 +709,9 @@ public sealed partial class SettingsWindow : Window
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
         Group(Toggle(Loc.T("最大化窗口避让胶囊", "Keep maximized windows clear of the capsule"), S.ReserveCapsuleSpace,
-            value => Change(s => s.ReserveCapsuleSpace = value), help:
-            Loc.T("使用胶囊样式时，在所在屏幕顶部预留胶囊高度及其顶部间距，让最大化窗口显示在胶囊下方。调整位置或大小后自动更新；关闭或退出后恢复。窗口行为规则仍然生效；如需保留胶囊显示，请将上方「有窗口最大化时」设为「保持原有样式」。",
-                "With the capsule style, reserves its height and top offset on its display so maximized windows stay below it. Updates when moved or resized; turning this off or exiting releases the space. Window behavior rules still apply; choose Keep style under When a window is maximized to keep the capsule visible.")),
+            value => { Change(s => s.ReserveCapsuleSpace = value); RefreshMaximized(); RefreshExceptions(); }, help:
+            Loc.T("使用胶囊样式时，在所在屏幕顶部预留胶囊高度及其顶部间距，让最大化窗口显示在胶囊下方。生效期间，全局和应用程序的最大化行为临时固定为「保持原有样式」；关闭或切换其他样式后恢复原设置。无边框全屏和独占全屏仍遵循各自规则。调整位置或大小后自动更新；退出后释放预留空间。",
+                "With the capsule style, reserves its height and top offset so maximized windows stay below it. While active, global and app-specific maximized behavior is temporarily locked to Keep style. Turning this off or choosing another style restores the saved choices. Borderless and exclusive full screen keep their own rules. Moving or resizing updates the space; exiting releases it.")),
             Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
             value => Change(s => s.ForceTopmost = value), help:
             Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
@@ -1206,14 +1211,17 @@ public sealed partial class SettingsWindow : Window
             "Where the panel opens when hovered, if the notch or capsule is wider than the expanded panel."));
     }
 
-    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)
+    private static string CapsuleAvoidanceRuleHelp => Loc.T("胶囊避让生效时，最大化行为临时固定为「保持原有样式」。关闭避让或切换其他样式后恢复原设置。",
+        "While capsule avoidance is active, maximized behavior is temporarily locked to Keep style. Turning avoidance off or choosing another style restores the saved choice.");
+
+    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed, bool enabled = true, string? help = null)
     {
-        var options = new UniformGrid { Columns = 3, Width = 324 };
+        var options = new UniformGrid { Columns = 3, Width = 324, IsEnabled = enabled };
         foreach (var behavior in Enum.GetValues<WindowBehavior>())
         {
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);
         }
-        return Row(title, SegmentBorder(options));
+        return Row(title, SegmentBorder(options), help: help is null ? null : () => help);
     }
 }

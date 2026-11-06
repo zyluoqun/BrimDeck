@@ -437,6 +437,7 @@ public sealed class DeckSettings
     public bool Animations { get; set; } = true;
     public bool ForceTopmost { get; set; }
     public bool ReserveCapsuleSpace { get; set; }
+    [JsonIgnore] public bool CapsuleAvoidanceEnabled => ReserveCapsuleSpace && Style == CompactStyle.Capsule;
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
@@ -596,7 +597,8 @@ public sealed class DeckSettings
         if (entries.Count == 0) { if (enabled && Apps.Count < AppPresets.MaximumApps) Apps.Add(new AppEntry { QuotaSource = id, UsageSource = id }); }
         else foreach (var entry in entries) entry.Enabled = enabled;
     }
-    // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
+    // Capsule avoidance temporarily keeps the maximized style without changing any saved global or app rule.
+    // Otherwise the app's own rule comes first, where it chooses one for that context, and the global
     // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
     // A background full screen has no rules of its own: backgroundKind, the way the window behind the foreground one fills
     // the screen (Maximized or Borderless), picks the rule, the app's own first and the global one after it, as if that
@@ -605,6 +607,7 @@ public sealed class DeckSettings
         ScreenContext? backgroundKind = null)
     {
         var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
+        if (CapsuleAvoidanceEnabled && kind == ScreenContext.Maximized) return WindowBehavior.Normal;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
                 if (ScreenPolicy.Matches(rule, processName, imagePath))
