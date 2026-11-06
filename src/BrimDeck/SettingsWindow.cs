@@ -703,7 +703,11 @@ public sealed partial class SettingsWindow : Window
         });
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
-        Group(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
+        Group(Toggle(Loc.T("最大化窗口避让胶囊", "Keep maximized windows clear of the capsule"), S.ReserveCapsuleSpace,
+            value => Change(s => s.ReserveCapsuleSpace = value), help:
+            Loc.T("使用胶囊样式时，在所在屏幕顶部预留胶囊高度及其顶部间距，让最大化窗口显示在胶囊下方。调整位置或大小后自动更新；关闭或退出后恢复。窗口行为规则仍然生效；如需保留胶囊显示，请将上方「有窗口最大化时」设为「保持原有样式」。",
+                "With the capsule style, reserves its height and top offset on its display so maximized windows stay below it. Updates when moved or resized; turning this off or exiting releases the space. Window behavior rules still apply; choose Keep style under When a window is maximized to keep the capsule visible.")),
+            Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
             value => Change(s => s.ForceTopmost = value), help:
             Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
                 "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")),

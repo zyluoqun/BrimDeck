@@ -174,7 +174,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { _capsuleWorkArea?.Dispose(); CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
@@ -249,6 +249,7 @@ public partial class MainWindow : Window
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
+        ApplyCapsuleWorkArea();
         // A new edge waits for the island to be cleared before the window moves (MainWindow.Edge.cs).
         if (ClearBeforeMoving(animatePage)) return;
         bool wasVisible = IsVisible;
@@ -260,7 +261,7 @@ public partial class MainWindow : Window
         ApplyMusicSettings();
         ApplySecondClock();
         ApplyScale();
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = LayoutScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
         // A new edge lays the panel out there at once (MainWindow.Edge.cs); the row is built again for it.
         bool newEdge = ApplyFrame();
@@ -372,7 +373,7 @@ public partial class MainWindow : Window
     // and work-area changes call (see the window hook in the constructor and App.DisplaysChanged).
     private void UpdateCollapsedGeometry()
     {
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = LayoutScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
     }
     private void UpdateCollapsedGeometry(Rect bounds, Rect work, double scale)

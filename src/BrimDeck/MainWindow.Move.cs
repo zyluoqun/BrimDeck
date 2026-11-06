@@ -50,7 +50,7 @@ public partial class MainWindow
     // Whether a taskbar takes part of this panel's display along an edge (the settings offer what to hang from there).
     internal bool TaskbarOn(ScreenEdge edge)
     {
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = LayoutScreen();
         if (!(scale > 0) || !double.IsFinite(scale)) scale = 1;
         var screenWork = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         return CollapsedMove.HasTaskbar(edge, bounds.Width / scale, bounds.Height / scale, screenWork);
@@ -177,7 +177,7 @@ public partial class MainWindow
     // drawn its first frame, so nothing blinks in between.
     private void StartMoveOverlay()
     {
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = LayoutScreen();
         if (!(scale > 0) || !double.IsFinite(scale)) scale = 1;
         _moveMonitor = (bounds, scale);
         var screenWork = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
