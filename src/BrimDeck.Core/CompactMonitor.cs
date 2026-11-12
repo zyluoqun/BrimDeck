@@ -25,8 +25,11 @@ public enum CompactMonitorItems
     // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
     Temperature = 64, Storage = 128,
+    // Was the lowest battery among the wireless devices; the devices are a part of the row of their own since 1.3.0
+    // (CompactPart.Devices), so it is dropped from saved tables and its number not reused.
+    Battery = 256,
     // The whole machine's power draw in watts (PowerResolver) and the machine's own battery (BatteryModel): outside the presets like
-    // Storage. 256 is left unused.
+    // Storage.
     Power = 512, Charge = 1024,
     // The frame rate of the program in front (FrameRates): one figure for every panel. Outside the presets too.
     Frames = 2048
@@ -202,7 +205,8 @@ public static class CompactMonitor
     }
 
     // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate, the
-    // drives, power, the battery, the frame rate. figure: the room after a ring, by ring (a ring showing its temperature too takes more).
+    // drives, power, the machine's battery, the frame rate. figure: the room after a ring, by ring (a ring
+    // showing its temperature too takes more).
     public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, Func<CompactMonitorItems, double> figure, double bareRing, double columns, double rate, double storage = 0, double power = 0, double charge = 0, double frames = 0) => item => item switch
     {
         CompactMonitorItems.Columns => columns,
@@ -244,6 +248,21 @@ public static class CompactMonitor
             x += (w + gap) * p; last = p;
         }
         return Math.Max(0, x - gap * last);
+    }
+
+    // The core columns at the strip's scale: each column's width, the gap between them and the width they take, which the strip
+    // both measures and draws, so no column falls outside the room it was given. Few cores take 2 apart by 1 each; more share 56,
+    // the gap narrowing to half a unit before a column gets narrower than 1; more than fit even then keep columns of 1 and widen
+    // the reading, so every core shows.
+    public static (double Column, double Gap, double Width) CoreColumns(int cores, double scale)
+    {
+        cores = Math.Max(1, cores);
+        double gap = Math.Max(.5, scale), column = Math.Max(1.5, 2 * scale), room = Math.Round(56 * scale);
+        if (cores * column + (cores - 1) * gap <= room) return (column, gap, cores * column + (cores - 1) * gap);
+        if ((room - (cores - 1) * gap) / cores is var shared and >= 1) return (shared, gap, room);
+        gap = .5;
+        if ((room - (cores - 1) * gap) / cores is var narrow and >= 1) return (narrow, gap, room);
+        return (1, gap, cores + (cores - 1) * gap);
     }
 
     // The width of the items side by side with this gap between them.

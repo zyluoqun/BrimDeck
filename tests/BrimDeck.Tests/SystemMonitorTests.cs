@@ -59,6 +59,11 @@ static class SystemMonitorTests
         check("Monitor rate per second", MonitorMetrics.Rate(1000, 3000, 2) == 1000);
         check("Monitor rate skips a counter reset", MonitorMetrics.Rate(3000, 1000, 1) is null && MonitorMetrics.Rate(1, 2, 0) is null);
         check("Monitor process CPU in percent of one core", MonitorMetrics.CpuPercent(0, 25_000_000, 1) == 250);
+        var shares = new ProcessorShares();
+        shares.Fill(new Dictionary<(int, int), double> { [(0, 0)] = 10, [(0, 1)] = 20, [(0, 2)] = 30 });
+        var gapped = shares.Fill(new Dictionary<(int, int), double> { [(0, 0)] = 40, [(0, 2)] = 50 });
+        check("Monitor processor left out of a reading keeps its last share", gapped.Count == 3 && gapped[(0, 0)] == 40 && gapped[(0, 1)] == 20 && gapped[(0, 2)] == 50);
+        check("Monitor reading without processors stays empty", shares.Fill(new Dictionary<(int, int), double>()).Count == 0);
         var memory = new MemorySample(100, 50, 40, 100);
         check("Monitor memory level normal", memory.Level == MemoryLevel.Normal && memory.UsedFraction == .5);
         check("Monitor memory level elevated by use or commit", (memory with { Used = 85 }).Level == MemoryLevel.Elevated && (memory with { CommitUsed = 82 }).Level == MemoryLevel.Elevated);
@@ -220,9 +225,9 @@ static class SystemMonitorTests
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
         check("Compact row: readings after the rings, with a gap", withRings is { MonitorAlone: false, MonitorWidth: 128 } && withRings.MiddleWidth == 172);
         var tight = CompactMusicLayout.Calculate(100, 1, false, 2, true, 0, 400);
-        // The readings keep half of the middle; one ring and the shortest lyric (30 DIP) stay in any case.
+        // The readings keep half of the middle; one ring and the shortest lyric (38 DIP) stay in any case.
         check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 50 && tight.MiddleWidth == 50
-            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 10, MiddleWidth: 30 });
+            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 2, MiddleWidth: 38 });
         check("Compact row: no readings, no region", CompactMusicLayout.Calculate(300, 1, true, 2, true, 40).MonitorWidth == 0);
         bool steady = true;
         for (double width = 60; width < 400; width++)
@@ -289,7 +294,7 @@ static class SystemMonitorTests
     private static void Pages(Action<string, bool> check)
     {
         var settings = new DeckSettings { MarketPage = false };
-        check("Pages: monitor comes after usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
+        check("Pages: monitor comes after usage and music, the clipboard after it, then the devices page", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices]));
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
         check("Pages: a drag sets the size of the page it is on and of no other",
@@ -309,17 +314,19 @@ static class SystemMonitorTests
         check("Pages: a hidden page falls back to the first shown one", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Music);
         settings.MonitorPage = false;
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
-        settings.MusicPage = false;
+        settings.MusicPage = false; settings.ClipboardPage = false; settings.DevicesPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
-        var ordered = new DeckSettings { PageOrder = [DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
-        check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Market]));
+        var ordered = new DeckSettings { MarketPage = false, PageOrder = [DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music], ClipboardPage = false };
+        check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]));
         ordered.MonitorPage = false;
-        check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Usage);
+        check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Devices && DeckPages.Visible(ordered).SequenceEqual([DeckPage.Devices, DeckPage.Usage, DeckPage.Music]));
+        ordered.DevicesPage = false;
+        check("Pages: the devices page leaves the switch with its page off, in whatever place it stands", DeckPages.Resolve(ordered, DeckPage.Devices) == DeckPage.Usage);
         var odd = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"PageOrder":[2,9,2]}""")!;
-        check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Market]));
+        check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Market, DeckPage.Clipboard, DeckPage.Devices]));
         var copy = ordered.Copy(); copy.PageOrder = [.. DeckPages.Order];
         var orderRead = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(ordered))!;
-        check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Monitor && orderRead.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Market])
+        check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Devices && orderRead.PageOrder.SequenceEqual([DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Market, DeckPage.Clipboard])
             && new DeckSettings().PageOrder.SequenceEqual(DeckPages.Order));
         var wheelOff = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!; wheelOff.Normalize();
         var wheelOn = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":true}""")!; wheelOn.Normalize();
@@ -329,9 +336,9 @@ static class SystemMonitorTests
         check("The wheel: enum values stay saved as before", (int)MouseWheelAction.None == 0 && (int)MouseWheelAction.Pages == 1 && (int)MouseWheelAction.Volume == 2);
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
-        var sizes = new DeckSettings { Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300, MarketPage = false };
+        var sizes = new DeckSettings { MarketPage = false, Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300, ClipboardWidth = 480, ClipboardHeight = 160 };
         check("Pages: the window holds the largest shown page", DeckPages.Largest(sizes) == (700, 300));
-        sizes.MusicPage = false; sizes.MonitorPage = false;
+        sizes.MusicPage = false; sizes.MonitorPage = false; sizes.ClipboardPage = false; sizes.DevicesPage = false;
         check("Pages: only shown pages size the window", DeckPages.Largest(sizes) == (Math.Max(500, sizes.MinimumWidth), 150));
         var saved = new DeckSettings { MonitorWidth = 5000, MonitorHeight = double.NaN, MonitorInterval = 9, MonitorPalette = (MonitorPalette)42, MonitorSort = (ProcessSort)7, LastPage = (DeckPage)9 };
         saved.Normalize();

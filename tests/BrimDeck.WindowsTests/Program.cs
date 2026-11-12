@@ -23,6 +23,7 @@ internal static class Program
             if (args is ["--only", "ringletter", ..]) { RingLetterChecks.Run(Check, args.Length > 2 ? args[2] : null); return Finish(); }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
+            if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -40,7 +41,7 @@ internal static class Program
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
-            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature and power readings, and the application identity the shell resolves (they read this machine or its shell).");
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else
             {
                 CheckGpus();
@@ -50,9 +51,11 @@ internal static class Program
                 AppIdentityChecks.Run(Check);
                 FrameRateChecks.Run(Check);
                 TemperatureChecks.Run(Check);
+                DeviceChecks.Run(Check);
                 PowerChecks.Run(Check);
             }
             SensorGuardChecks.Run(Check);
+            FontFollowTests.Run(Check);
 
             return Finish();
         }
@@ -106,12 +109,12 @@ internal static class Program
             Check("GPU auto shows a discrete adapter", GpuChoice.Auto(gpus, 0)?.Kind == GpuKind.Discrete);
         // The drivers' own usage: asked twice, as Intel's counters need two readings; an adapter Windows saw idle is not asked.
         var drivers = new GpuDrivers(() => { });
-        drivers.Read(gpus, 0, true);
+        drivers.Read(gpus, 0, true, GpuUsageSource.Driver);
         Thread.Sleep(1000);
-        foreach (var gpu in drivers.Read(gpus, 1, true))
+        foreach (var gpu in drivers.Read(gpus, 1, true, GpuUsageSource.Driver))
             Console.WriteLine($"GPU driver: {gpu.Name ?? "(unnamed)"} usage {gpu.Usage:P0} from {gpu.UsageSource ?? "Windows engines"}, engines {gpu.EngineUsage:P0}"
                 + (gpu.DriverWatts is { } watts ? $", {watts:0.0} W" : "") + (gpu.DriverTemperature is { } heat ? $", {heat:0} °C" : ""));
-        Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2, true).All(gpu => gpu.Usage is >= 0 and <= 1
+        Check("GPU driver usage is a share, and only for an adapter Windows saw working", drivers.Read(gpus, 2, true, GpuUsageSource.Driver).All(gpu => gpu.Usage is >= 0 and <= 1
             && (gpu.UsageSource is null || gpu.EngineUsage > 0)));
     }
     private static string Gigabytes(Reading<ulong> bytes) => bytes.TryGet(out var value) ? $"{value / 1e9:0.00} GB" : "?";

@@ -5,7 +5,7 @@ internal static class MarketProductTests
 {
     public static void Run(Action<string, bool> check)
     {
-        var settings = new DeckSettings { UsagePage = true, MusicPage = true, MonitorPage = true, MarketPage = true };
+        var settings = new DeckSettings { UsagePage = true, MusicPage = true, MonitorPage = true, MarketPage = true, ClipboardPage = false, DevicesPage = false };
         check("Four expanded modules retain the original page order", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Market]));
         check("Market page is independent of compact market switches", !settings.ShowsMarket(CompactStyle.Capsule) && DeckPages.Shown(settings, DeckPage.Market));
         settings.NotchMarket = settings.CapsuleMarket = settings.LineMarket = true;
@@ -53,10 +53,21 @@ internal static class MarketProductTests
         check("Null chart pins safely reload as an empty selection", restored.MarketChartPinnedPanes.Count == 0);
         settings.PageOrder = [DeckPage.Market, DeckPage.Monitor, DeckPage.Music, DeckPage.Usage];
         restored = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Custom market participates in the upstream saved page order", DeckPages.Visible(restored).SequenceEqual(settings.PageOrder)
+        check("Custom market participates in the upstream saved page order", restored.PageOrder.SequenceEqual(settings.PageOrder) && DeckPages.Visible(restored).SequenceEqual(DeckPages.Visible(settings))
             && DeckPages.Resolve(restored, (DeckPage)999) == DeckPage.Market);
         restored = SettingsMigrations.Read("{\"PageOrder\":[2,1,0]}");
-        check("Upstream settings without the market page retain it after the original pages", restored.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Music, DeckPage.Usage, DeckPage.Market]));
+        check("Upstream settings without the market page retain it after the original pages", restored.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Music, DeckPage.Usage, DeckPage.Market, DeckPage.Clipboard, DeckPage.Devices]));
+        var legacy = SettingsMigrations.Read("""{"AppVersion":"1.2.4","DefaultPage":4,"PageOrder":[3,2,0,1],"NotchOrder":[5,3,4,2,0,1],"ReserveCapsuleSpace":true,"MarketChartFullscreen":false,"MarketChartWorkspaces":{"layout":{"Name":"Saved","Interval":"4h","PinnedPanes":[1]}}}""");
+        check("Upgrade 1.3.0: saved market page and compact part numbers retain their meaning",
+            legacy.DefaultPage == DefaultDeckPage.Market && legacy.PageOrder[0] == DeckPage.Market
+            && legacy.NotchOrder.Take(3).SequenceEqual([CompactPart.Clock, CompactPart.Market, CompactPart.Equalizer]));
+        check("Upgrade 1.3.0: capsule reservation and shared chart choices survive migration",
+            legacy.ReserveCapsuleSpace && !legacy.MarketChartFullscreen && legacy.MarketChartWorkspaces["layout"].PinnedPanes.SequenceEqual([1]));
+        check("Upgrade 1.3.0: new pages and compact parts have distinct appended numbers",
+            (int)DeckPage.Market == 3 && (int)DefaultDeckPage.Market == 4 && (int)CompactPart.Market == 3
+            && (int)CompactPart.Equalizer == 4 && (int)CompactPart.Clock == 5
+            && (int)DeckPage.Clipboard == 4 && (int)DeckPage.Devices == 5
+            && (int)CompactPart.Transfer == 6 && (int)CompactPart.Devices == 7);
         foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
         {
             double width = CompactMusicLayout.NaturalWidth(1, true, 3, true, 39.7, 150.2, 280, 260, dpi: dpi);

@@ -24,6 +24,11 @@ internal static class PanelTheme
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
+    // Whether the panel's surface lets what lies behind show through (DeckSettings.SurfaceTransparency).
+    public static bool Translucent { get; private set; }
+    // Another interface font (Fonts.Use) makes everything built from the old one out of date, as another palette does: every page and
+    // cache that compares Generation is built again, with no fade, since no color changes.
+    public static void Outdate() => Generation++;
     // Raised just before another palette becomes current; true when a theme trades its day and night looks.
     public static event Action<bool>? Changing;
     // The themes found in the folder at the last reload.
@@ -62,6 +67,10 @@ internal static class PanelTheme
     // between light and dark (systemChanged) while "system" is chosen.
     public static bool Use(DeckSettings settings, bool reload = false, bool systemChanged = false)
     {
+        // Turning the surface see-through or opaque again changes how text and marquees are drawn on it, so what was built for the
+        // other is built again (Outdate); a new amount alone only redraws the surface.
+        bool translucent = settings.SurfaceTransparency > 0;
+        if (translucent != Translucent) { Translucent = translucent; Outdate(); }
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // The hour reaching the other look, or new hours for it, counts as a change too.
         bool high = SystemParameters.HighContrast;
@@ -326,5 +335,7 @@ internal static class PanelTheme
         => new(new GradientStopCollection(stops.Select((stop, i) => new GradientStop(ToColor(stop), (double)i / (stops.Count - 1)))), new Point(0, 0), end);
     // The text marquees draw their edge fades in the surface color; over a gradient or scan lines that color would show as a band,
     // so there they fade the text itself instead (MusicMarquee.InkFade).
-    public static Color? MarqueeBackdrop => Current.HasOverlay ? null : ColorOf("surface");
+    // A see-through surface (Translucent) has no single color behind the text either.
+    public static Color? MarqueeBackdrop => InkFade ? null : ColorOf("surface");
+    public static bool InkFade => Current.HasOverlay || Translucent;
 }

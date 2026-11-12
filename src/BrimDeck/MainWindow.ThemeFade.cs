@@ -41,7 +41,7 @@ public partial class MainWindow
         // The material: a copy of the island's own shape, dressed as it is now, without its content.
         var material = new IslandBorder
         {
-            Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
+            Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity, SurfaceOpacity = Island.SurfaceOpacity,
             // The brush's opacity too, whatever it is, so the copy looks exactly as the surface does.
             Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }
         };

@@ -32,8 +32,12 @@ public partial class App : Application
     private bool _arrangePending;
     // Every panel shows the one set of players, and their lyrics are looked up once.
     internal MediaSessions? Media { get; private set; }
+    // The players as they were when the music was switched off, kept until the settings have rested a while (RequestRelease).
+    private MediaSessions? _restingMedia;
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; private set; } = null!;
+    // The clipboard history and the file transfer, shared by every panel (ShelfService).
+    internal ShelfService Shelf { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
@@ -43,6 +47,13 @@ public partial class App : Application
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
     // The panels whose open monitor page shows the power line (PresentMonitor): the power is read for those, and for a row that chose it.
     private readonly HashSet<MainWindow> _presentingPower = [];
+    // The wireless devices' batteries, shared by every panel; created when first wanted (UpdateDeviceDemand).
+    internal DeviceBatteries? Devices { get; private set; }
+    internal event Action? DevicesChanged;
+    private readonly HashSet<MainWindow> _devicePages = [], _deviceStrips = [];
+    // The panels whose collapsed row shows readings or is only hidden for now (the panel open, a notice in it, PresentMonitor): the
+    // temperatures the row shows are read for these, so a row shown again has them in its first readings and not a dash.
+    private readonly HashSet<MainWindow> _heldStrip = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -91,7 +102,7 @@ public partial class App : Application
         }
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
-        UseLanguage();
+        UseLanguage(); UseFont();
         PanelTheme.Use(Settings);
         ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
@@ -110,8 +121,9 @@ public partial class App : Application
         Secrets = new ProviderSecrets(folder);
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
-            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
+            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         WindowDrags = new WindowDrags();
+        Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
@@ -122,7 +134,9 @@ public partial class App : Application
         // Only for a user who has the monitor page with its power line: the rest never open it.
         if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
         WarmSettingsWriter();
+        ApplyMemoryMode();
         DisplayPower.Install(Dispatcher);
+        DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
         ApplyTray();
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
@@ -151,6 +165,11 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Write(args.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
     }
+    // The user's own font goes in front of the interface's families (Fonts); false when it is the one already in use.
+    // The families are published at the start whatever is chosen, so the XAML defaults are never what the text is drawn in by accident.
+    // A change counts as a new look (PanelTheme.Outdate): the pages, the collapsed row and the caches keyed on the theme are built again.
+    private bool UseFont() { bool changed = Fonts.Use(Settings.UiFont); if (changed) PanelTheme.Outdate(); if (!_fontsPublished) { _fontsPublished = true; Fonts.Publish(Resources); } return changed; }
+    private bool _fontsPublished;
     // Names used by XAML templates follow the language through these resources.
     private void UseLanguage()
     {
@@ -159,6 +178,8 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    // The clipboard page's menus open the settings at its own pages (SettingsWindow.ClipboardSettingsPage, TransferSettingsPage).
+    internal void OpenSettingsPage(int page) { ShowSettings(false); _settingsWindow?.ShowPage(page); }
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
     // the tray icon.
     private void ShowFromRelaunch()
@@ -169,7 +190,7 @@ public partial class App : Application
     // Adds or removes the tray icon to match the settings.
     private void ApplyTray()
     {
-        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
+        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough);
         else if (!Settings.ShowTrayIcon && _tray is not null) { _tray.Dispose(); _tray = null; }
     }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
@@ -213,14 +234,23 @@ public partial class App : Application
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
-        bool styleChanged = settings.Style != Settings.Style;
+        bool styleChanged = settings.Style != Settings.Style, memoryChanged = settings.MemoryMode != Settings.MemoryMode;
         settings.Normalize(); Settings = settings;
         UpdateCandleCountdownSettings();
+        if (memoryChanged) ApplyMemoryMode();
+        // A monitor page switched on in the smooth mode has its counters set up ahead, as at start.
+        else if (MemoryPlan.WarmAtStart) WarmMonitor();
+        // What a page switched off leaves behind is let go once the settings have rested a while.
+        RequestRelease();
+        // A different interface font is published at once and reaches every window already made (Fonts.Use); the panels below lay out again with it.
+        UseFont();
+        Shelf.Apply(settings);
         ApplyHotkeys();
         _ = RefreshMarketAsync();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
+        UpdateDeviceDemand();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -234,6 +264,8 @@ public partial class App : Application
     }
     // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
     internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
+    // A new reading may bring quotas an application row's ring choices did not have yet (SettingsWindow.QuotasChanged).
+    internal void SnapshotsChanged() => _settingsWindow?.QuotasChanged();
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;
@@ -313,11 +345,27 @@ public partial class App : Application
     internal void StartMedia()
     {
         bool wanted = Settings.MediaWanted;
-        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0); _ = Media.StartAsync(); }
-        else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
+        if (wanted && Media is null)
+        {
+            // Switched off a moment ago and still kept: the players, the song and its cover are as they were, and the panels take
+            // them once the settings have been applied.
+            var kept = _restingMedia; _restingMedia = null;
+            Media = kept ?? new MediaSessions(Dispatcher) { Ignored = Settings.IgnoredMediaApps };
+            UseMediaPlan(Media, MemoryPlan); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0);
+            if (kept is null) _ = Media.StartAsync(); else Dispatcher.BeginInvoke(() => { if (ReferenceEquals(Media, kept)) RaiseMediaChanged(); });
+        }
+        // Switched off, the panels show no music at once; the players themselves are let go later (ReleaseUnused), so a switch
+        // tried off and on again does not look for them and their songs anew.
+        // Meanwhile they capture no sound and do nothing to a player on their own (its full control is not set up again).
+        else if (!wanted && Media is not null)
+        {
+            Media.Changed -= RaiseMediaChanged; Media.SetPresentationActive(false, false);
+            Media.NeteaseAutoFullControl = false; Media.NeteaseFileControlWanted = false; Media.KugouFullControlWanted = false;
+            _restingMedia = Media; Media = null; RaiseMediaChanged();
+        }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
-        if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
+        if (Media is not null) { Media.Ignored = Settings.IgnoredMediaApps; Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
     // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
@@ -330,45 +378,105 @@ public partial class App : Application
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.
-    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false)
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false, bool heldStrip = false)
     {
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
         if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
-        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
+        if (strip || heldStrip) _heldStrip.Add(deck); else _heldStrip.Remove(deck);
+        LingerPageExtras();
+        ApplyMonitorDemand(lingered: false);
+    }
+    // lingered: the page's linger just ran out (LingerPageExtras), so a sampler no longer wanted stops at once instead of lingering again.
+    private void ApplyMonitorDemand(bool lingered)
+    {
+        // A page that closed a moment ago is still read for, processes included, while its extras linger: opened again, it shows
+        // the current list at once instead of "Reading processes…" until the first list comes.
+        bool listing = _presentingMonitor.Count > 0 || _pageExtras;
+        bool wanted = listing || _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
         // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
-        if (Monitor is null)
-        {
-            Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
-            Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
-            // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
-            Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
-        }
+        Monitor ??= CreateMonitor();
         // What is read besides the usage is set before the sampler starts, so its first collection already holds it.
         UpdateMonitorExtras();
-        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        Monitor.SetDemand(wanted, MemoryPlan.ReadingSeconds(Settings.MonitorInterval, listing), listing, immediate: lingered);
     }
+    private SystemSampler CreateMonitor()
+    {
+        var monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
+        monitor.UsePlan(MemoryPlan);
+        monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
+        // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
+        monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
+        return monitor;
+    }
+    // The devices are read while any panel shows the devices page or the collapsed battery reading, or the settings list them;
+    // otherwise nothing runs (DeviceBatteries lets every source go after a short linger).
+    internal void PresentDevices(MainWindow deck, bool page, bool strip)
+    {
+        if (page) _devicePages.Add(deck); else _devicePages.Remove(deck);
+        if (strip) _deviceStrips.Add(deck); else _deviceStrips.Remove(deck);
+        UpdateDeviceDemand();
+    }
+    private void UpdateDeviceDemand()
+    {
+        // The settings page is not read for with the display off, as a panel is not (its own demand drops then).
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings && !DisplayPower.Off ? DeviceDemand.Watch : DeviceDemand.None;
+        if (Exiting || Devices is null && demand == DeviceDemand.None) return;
+        if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.UsePlan(MemoryPlan); Devices.Changed += DeviceBatteriesChanged; }
+        Devices.SetDemand(demand);
+    }
+    // The settings' devices page lists what is connected, so it reads the devices while it is open.
+    private bool _deviceSettings;
+    internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
+    private void DeviceBatteriesChanged() => DevicesChanged?.Invoke();
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
-    // it shows those.
+    // it shows those. The processor's and the adapter's temperatures also while the row is only hidden for now, as long as the sampler
+    // runs for something else (the page, or the pause after it): the row shown again then takes readings that have them.
+    // What an open monitor page asks for (the process list, temperatures, drives, power, frame rate, adapters) stays asked for for a while
+    // after the page closes (MemoryPlan.LingerExtras, ReadingsLinger), so a page opened again within it has them at once instead of
+    // priming them again. The saver mode lets them go when the page closes.
+    private DispatcherTimer? _pageLinger;
+    private bool _pageExtras, _pagePower, _pageFrames;
+    private void LingerPageExtras()
+    {
+        if (_presentingMonitor.Count > 0)
+        {
+            _pageLinger?.Stop();
+            _pageExtras = true; _pagePower = _presentingPower.Count > 0; _pageFrames = _presentingMonitor.Any(deck => deck.PageShowsFrames);
+            return;
+        }
+        if (!_pageExtras) return;
+        var plan = MemoryPlan;
+        if (!plan.LingerExtras || Exiting) { _pageLinger?.Stop(); _pageExtras = false; return; }
+        if (_pageLinger is null)
+        {
+            _pageLinger = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+            _pageLinger.Tick += (_, _) => { _pageLinger.Stop(); _pageExtras = false; ApplyMonitorDemand(lingered: true); };
+        }
+        if (!_pageLinger.IsEnabled) { _pageLinger.Interval = plan.ReadingsLinger; _pageLinger.Start(); }
+    }
     internal void UpdateMonitorExtras()
     {
-        bool page = _presentingMonitor.Count > 0;
+        bool page = _presentingMonitor.Count > 0 || _pageExtras;
         bool strip = _stripMonitor.Count > 0;
-        var shown = strip ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
-        bool Heat(CompactMonitorItems item) => (shown & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
+        var held = _heldStrip.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        // A row that shows its readings is among the held ones (PresentMonitor).
+        var shown = strip ? held : CompactMonitorItems.None;
+        bool Heat(CompactMonitorItems item, CompactMonitorItems among) => (among & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
-        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
+        if (Monitor is not null) Monitor.GpuUsage = Settings.MonitorGpuUsage;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held),
             page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage, shown),
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
-            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (_presentingPower.Count > 0 || _pageExtras && _pagePower) && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
             (shown & CompactMonitorItems.Charge) != 0,
             // The frame rate for a row that shows it, or an open page with room for its line.
-            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && _presentingMonitor.Any(deck => deck.PageShowsFrames),
+            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && (_presentingMonitor.Any(deck => deck.PageShowsFrames) || _pageExtras && _pageFrames),
             // The graphics adapters for the page and the row's GPU reading (the power asks for them itself).
             page || (shown & CompactMonitorItems.Gpu) != 0);
     }
@@ -432,10 +540,11 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         _marketTimer.Stop(); _marketHttp.Dispose(); _chartHttp.Dispose(); _chromeCharts?.Dispose();
         StopCandleCountdown();
-        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
+        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

@@ -74,7 +74,7 @@ public partial class MainWindow
     private void RenderMarket()
     {
         RefreshStatus();
-        UsageContent.Visibility = MusicContent.Visibility = MonitorContent.Visibility = Visibility.Collapsed;
+        UsageContent.Visibility = MusicContent.Visibility = MonitorContent.Visibility = ShelfContent.Visibility = DevicesContent.Visibility = Visibility.Collapsed;
         MarketContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(PanelHeader.For(36, 14)); MarketContent.Margin = new Thickness(14, 0, 14, 12);

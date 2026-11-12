@@ -14,6 +14,22 @@ Directory.CreateDirectory(root);
 try
 {
     if (args is ["--only", "workarea"]) { WorkAreaReservationTests.Run(Check); return; }
+    if (args is ["--verify-upgrade-config", var settingsFile])
+    {
+        var json = File.ReadAllText(settingsFile);
+        var original = JsonSerializer.Deserialize<DeckSettings>(json)!; original.Normalize();
+        var upgraded = SettingsMigrations.Read(json);
+        var before = JsonSerializer.SerializeToElement(original);
+        var after = JsonSerializer.SerializeToElement(upgraded);
+        foreach (var property in before.EnumerateObject().Where(p => p.Name.Contains("Market") || p.Name.Contains("Candle") || p.Name is "PageOrder" or "DefaultPage" or "NotchOrder" or "CapsuleOrder" or "ReserveCapsuleSpace" or "FullscreenRules" or "Maximized" or "Borderless" or "Exclusive" or "Apps" or "Style" or "Display" or "DisplayMonitors"))
+            Check("Existing configuration preserved: " + property.Name, property.Value.GetRawText() == after.GetProperty(property.Name).GetRawText());
+        Console.WriteLine($"{passed} existing configuration checks passed."); return;
+    }
+    if (args is ["--only", "upgrade"])
+    {
+        MarketCompositionTests.Run(Check); MarketProductTests.Run(Check); CompactReadingTests.Run(Check); SystemMonitorTests.Run(Check); ShelfTests.Run(Check); DevicesPageTests.Run(Check);
+        Console.WriteLine($"{passed} upgrade checks passed."); return;
+    }
     await MarketFeedTests.Run(Check);
     MarketDisplayTests.Run(Check);
     ChartLayoutTests.Run(Check);
@@ -33,9 +49,11 @@ try
     EqualizerSpectrumTests.Run(Check);
     EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
+    ShelfTests.Run(Check);
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);
+    QuotaRingTests.Run(root, Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
@@ -57,12 +75,18 @@ try
     StorageTests.Run(Check);
     SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    DevicesTests.Run(Check);
+    DeviceProtocolTests.Run(Check);
+    DeviceSafetyTests.Run(Check);
     PowerTests.Run(Check);
+    DevicesPageTests.Run(Check);
     FrameRateTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
     ExpandStillTests.Run(Check);
+    FontTests.Run(root, Check);
+    SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
@@ -82,6 +106,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
@@ -94,6 +119,7 @@ try
     await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
     await CursorUsageTests.Run(root, Check);
+    await CursorPricesTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[
@@ -630,6 +656,9 @@ try
     Check("Claude fractional reset", QuotaParser.Claude(Json("""{"five_hour":{"utilization":25,"resets_at":"2026-09-06T12:33:44.123456Z"}}""")).Single().ResetAt is not null);
     var cursor = QuotaParser.Cursor(Json("""{"individualUsage":{"plan":{"autoPercentUsed":"12.5","apiPercentUsed":20}},"billingCycleEnd":"1789000000000"}"""));
     Check("Cursor fractional percent preserved", cursor.Count == 2 && cursor[0].UsedPercent == 12.5 && cursor[0].ResetAt is not null);
+    var unifiedCursor = Json("""{"billingCycleStart":"1793589134270","billingCycleEnd":"1794193934270","planUsage":{"autoPercentUsed":0.2,"apiPercentUsed":0,"totalPercentUsed":0.2}}""");
+    Check("A merged Cursor plan is one weekly quota of the total share", QuotaParser.Cursor(unifiedCursor, unified: true).Single() is { Label: "每周额度", UsedPercent: 0.2, Minutes: 10080 });
+    Check("A merged Cursor plan without a total share invents no quota", QuotaParser.Cursor(Json("""{"planUsage":{"autoPercentUsed":0.2}}"""), unified: true).Count == 0);
     var grokBot = QuotaParser.SandUsage(Json("""{"usagePercent":0.856,"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z"}"""));
     Check("Grok Bot usage becomes a quota row with its reset", grokBot is { Label: "Grok Bot", UsedPercent: 0.856 } && grokBot.ResetAt is not null);
     Check("Grok Bot usage without a percent is skipped", QuotaParser.SandUsage(Json("""{"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z"}""")) is null);
@@ -642,6 +671,13 @@ try
     Check("Unknown Claude profile does not invent a plan", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"unknown"}}""")) == "");
     var eventItem = UsageService.ParseCursorEvent(Json("""{"timestamp":"1789000000000","model":"composer-2.5","tokenUsage":{"inputTokens":100,"cacheReadTokens":900,"cacheWriteTokens":20,"outputTokens":30,"totalCents":3.45131}}"""));
     Check("Cursor token categories are disjoint", eventItem!.Total == 1050);
+    var billingItem = UsageService.ParseCursorBillingItem(Json("""{"billingItemId":"b-1","eventTime":"2026-11-02T03:20:43.357Z","product":"grok-bot","chargeCategory":"usage","usageType":"included","usage":{"cache-write-text-tokens":"17128","cached-prompt-text-tokens":"22031","completion-text-tokens":"664","prompt-text-tokens":"4","web-search-calls":"2"},"pricing":{"currency":"USD","contracted":"0.0000000000"},"totalTokens":"39827"}"""));
+    Check("A merged Cursor billing item keeps its token kinds apart and is named by its product",
+        billingItem is { Key: "cursor:b-1", Model: "Grok Bot", Input: 4, CacheRead: 22031, CacheWrite: 17128, Output: 664, Total: 39827, ReportedCostUsd: null });
+    Check("A merged Cursor billing item outside the included usage keeps its amount and model",
+        UsageService.ParseCursorBillingItem(Json("""{"billingItemId":"b-2","eventTime":"2026-11-02T03:20:43Z","product":"agent","chargeCategory":"usage","usageType":"on_demand","usage":{"prompt-text-tokens":"10"},"pricing":{"contracted":"0.0123000000"},"displayExtras":{"model":"composer-2.5"}}""")) is { Model: "composer-2.5", ReportedCostUsd: 0.0123m });
+    Check("A Cursor credit grant is not a usage record",
+        UsageService.ParseCursorBillingItem(Json("""{"billingItemId":"b-3","eventTime":"2026-11-02T03:20:43Z","chargeCategory":"credit","usageType":"credits","usage":{},"pricing":{"contracted":"-5.0000000000"}}""")) is null);
     Check("Cursor API cost cents converted", pricing.Estimate(eventItem!) == .0345131m);
     Check("Reported cost is not marked as an estimate", pricing.Summarize([eventItem!]) is { Reported: 1, Estimated: 0, IsEstimate: false });
     TokenEntry Charged(int i, long input, long output, long write, long read, decimal perInput = 2, decimal perOutput = 6) =>

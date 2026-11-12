@@ -32,7 +32,8 @@ internal static class ChartWindowUiTests
                 Apps = [], UsagePage = false, UsageAutoSync = false, MusicPage = false, MonitorPage = false, MarketPage = false,
                 CapsuleSummary = false, CapsuleMusic = false, CapsuleMonitor = false, CapsuleClock = false,
                 CapsuleMarket = false, NotchMarket = false, LineMarket = false, CandleCountdownPeriods = CandlePeriods.None,
-                ShowTrayIcon = false, TrimMemoryWhenIdle = false, BackgroundWindows = false, Animations = false,
+                ClipboardPage = false, DevicesPage = false,
+                ShowTrayIcon = false, MemoryMode = MemoryMode.Balanced, BackgroundWindows = false, Animations = false,
                 MarketChartDisplay = new("missing-monitor", "Disconnected chart monitor"), MarketChartFullscreen = false,
                 MarketChartWorkspaces = new() { ["one"] = new() { Name = "First", Interval = "1h" }, ["two"] = new() { Name = "Second", Interval = "4h" } }
             };

@@ -48,7 +48,8 @@ internal static class CapsuleAvoidanceUiTests
                 Apps = [], UsagePage = false, UsageAutoSync = false, MusicPage = false, MonitorPage = false, MarketPage = false,
                 CapsuleSummary = false, CapsuleMusic = false, CapsuleMonitor = false, CapsuleClock = false,
                 CapsuleMarket = false, NotchMarket = false, LineMarket = false, CandleCountdownPeriods = CandlePeriods.None,
-                ShowTrayIcon = false, TrimMemoryWhenIdle = false, BackgroundWindows = false, Animations = false
+                ClipboardPage = false, DevicesPage = false,
+                ShowTrayIcon = false, MemoryMode = MemoryMode.Balanced, BackgroundWindows = false, Animations = false
             };
             Set(app, nameof(BrimDeck.App.Settings), settings);
             Set(app, nameof(BrimDeck.App.Store), new SettingsStore(folder));

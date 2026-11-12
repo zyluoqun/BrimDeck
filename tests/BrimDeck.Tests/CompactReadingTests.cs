@@ -48,7 +48,7 @@ internal static class CompactReadingTests
         check("Compact readings: defaults show every usage reading", CompactMonitor.Visible(defaults.CompactReadings) == All && CompactMonitor.Values(defaults.CompactReadings) == CompactMonitor.Rings
             && Same(defaults.CompactReadings, [.. CompactMonitor.Order]));
 
-        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":256,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
+        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":4096,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
             Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
@@ -94,6 +94,17 @@ internal static class CompactReadingTests
 
     private static void Layout(Action<string, bool> check)
     {
+        // The core columns take the width they measure: at every scale and count, the columns and gaps add up to it.
+        foreach (double scale in new[] { .5, 1, 1.25, 1.5, 2 })
+            foreach (int cores in new[] { 4, 8, 16, 20, 24, 32, 48, 64, 128 })
+            {
+                var (column, gap, room) = CompactMonitor.CoreColumns(cores, scale);
+                check($"Compact readings: {cores} core columns at {scale} fill their width", Math.Abs(cores * column + (cores - 1) * gap - room) < 1e-9 && column >= 1 && gap >= .5);
+            }
+        check("Compact readings: 32 core columns fit the usual room", CompactMonitor.CoreColumns(32, 1) is { Gap: .5, Width: 56 } wide && wide.Column > 1);
+        check("Compact readings: few core columns keep their full size", CompactMonitor.CoreColumns(8, 1) == (2, 1, 23));
+        check("Compact readings: too many core columns widen the reading", CompactMonitor.CoreColumns(64, 1) == (1, .5, 95.5));
+
         CompactMonitorItems[] order = [Upload, Gpu, Cpu, Columns, Download, Memory];
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50);
         var arranged = CompactMonitor.Arrange(order, All & ~Download, width, 10, _ => 1);
@@ -275,21 +286,21 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock];
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
         var defaults = new DeckSettings();
         check("Compact order: both styles preserve original order and append market", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices])
             && odd.CapsuleOrder.SequenceEqual(standard));
         var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
         var custom = Read("""{"AppVersion":"1.2.2","NotchOrder":[3,1,2,0],"NotchMarket":true}""");
         check("Compact order: existing custom market number stays market after the upstream upgrade", (int)CompactPart.Market == 3
-            && custom.NotchOrder.SequenceEqual([CompactPart.Market, CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock]) && custom.NotchMarket);
+            && custom.NotchOrder.SequenceEqual([CompactPart.Market, CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]) && custom.NotchMarket);
         check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
-            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock]));
+            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
         var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[5,0,4,1,2,3]}""");
         check("Compact order: the equalizer and the clock keep a place chosen for them",
-            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Market]));
+            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor, CompactPart.Market, CompactPart.Transfer, CompactPart.Devices]));
         var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
         check("Compact equalizer: a file from before its own switch shows it as the music was shown",
             !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
@@ -312,6 +323,6 @@ internal static class CompactReadingTests
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Market, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices]));
     }
 }

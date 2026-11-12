@@ -170,7 +170,7 @@ internal static class CandleCountdownUiTests
             var parts = (StackPanel)clockRow.Parent;
             var countdownRow = (StackPanel)((Grid)countdownToggle.Parent).Parent;
             var group = (StackPanel)parts.Parent;
-            check("Collapsed settings places countdown immediately after Clock", parts.Children.OfType<Border>().Last() == clockRow
+            check("Collapsed settings keeps countdown immediately after the ordered content including Clock", parts.Children.Contains(clockRow)
                 && ReferenceEquals(group, countdownRow.Parent) && group.Children.IndexOf(countdownRow) == group.Children.IndexOf(parts) + 2);
             check("Countdown settings offers only the approved three periods", names.Count(name => name.StartsWith(Loc.T("收盘倒计时 ", "Candle countdown "))) == 3);
             content.Measure(new Size(650, double.PositiveInfinity)); content.Arrange(new Rect(0, 0, 650, content.DesiredSize.Height)); content.UpdateLayout();

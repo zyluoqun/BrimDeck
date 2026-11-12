@@ -54,7 +54,6 @@ public partial class MainWindow
     private DispatcherTimer? _timelineHoldEnd;
     private Slider? _musicSeek;
     private readonly ScaleTransform _musicCoverScale = new(1, 1);
-    internal MusicLayout? CurrentMusicLayout { get; private set; }
     private TextBlock? _musicElapsed, _musicDuration, _lyricPrevious, _lyricNext, _musicMessage;
     // The current line scrolls when it is wider than the column; the lines around it are cut off with an ellipsis.
     private MusicMarquee? _lyricCurrent, _musicTitle;
@@ -83,6 +82,8 @@ public partial class MainWindow
     internal bool IsMonitorPage => CurrentPage == DeckPage.Monitor;
     internal bool IsUsagePage => CurrentPage == DeckPage.Usage;
     internal CompactMusicLayout? CurrentCompactLayout { get; private set; }
+    internal MusicLayout? CurrentMusicLayout { get; private set; }
+    internal bool IsShelfPage => CurrentPage == DeckPage.Clipboard;
 
     private void InitializeMusic()
     {
@@ -109,12 +110,16 @@ public partial class MainWindow
         if (_musicStarted) _app.StartMedia();
         if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
         UpdateLyrics();
-        _musicRenderKey = "";
     }
     private void ApplyDefaultMusicPage()
     {
-        var wanted = DeckPages.OnHover(Settings, _page, MarketHoverTarget);
-        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
+        // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
+        // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
+        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && PointerOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.OnHover(Settings, _page, MarketHoverTarget);
+        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
+        // The clipboard page builds nothing while the panel is closed (RenderShelf), the page switch just above included: it is
+        // built now, as the panel opens on it.
+        if (_shelfStale && IsShelfPage) RenderShelf();
     }
     // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
     // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
@@ -138,11 +143,12 @@ public partial class MainWindow
         bool back = Settings.PageOrder.IndexOf(page) < Settings.PageOrder.IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
-    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Market => MarketContent, _ => UsageContent };
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Market => MarketContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
-        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();
-        ApplySettings(animatePage);
+        // The music page keeps what it built while another page shows (RenderMusic's key), so switching back does not build it again.
+        _detailPopup?.Close(); _details = false; _page = page; _handover.Drop();
+        ApplySettings(animatePage, pageOnly: true);
     }
     // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
     // a scrolling part of a page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up;
@@ -174,6 +180,8 @@ public partial class MainWindow
 
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
+    private void ShelfPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Clipboard);
+    private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
     // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
@@ -190,7 +198,7 @@ public partial class MainWindow
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
         FitPageButtons(header);
-        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, MarketPageButton })
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, MarketPageButton, ShelfPageButton, DevicesPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
@@ -204,11 +212,12 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, MarketPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, MarketPageButton, ShelfPageButton, DevicesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
-        PageSwitch.Visibility = _details && IsUsagePage ? Visibility.Collapsed : Visibility.Visible;
+        PageSwitch.Visibility = _details && IsUsagePage || IsShelfPage && ShelfHidesSwitch ? Visibility.Collapsed : Visibility.Visible;
         OrderPageButtons();
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (MarketPageButton, DeckPage.Market) })
+        if (!IsShelfPage) { ShelfToolbar.Visibility = Visibility.Collapsed; ShelfSearchButton.Visibility = Visibility.Collapsed; }
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (MarketPageButton, DeckPage.Market), (ShelfPageButton, DeckPage.Clipboard), (DevicesPageButton, DeckPage.Devices) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -426,7 +435,7 @@ public partial class MainWindow
         // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
         bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; MarketContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; MarketContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;
@@ -448,14 +457,15 @@ public partial class MainWindow
         bool timeline = track?.HasTimeline == true || track is not null && _timelineHold.Holds(DateTimeOffset.UtcNow);
         var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
-        CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
-        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
+        // Fitting the usage page for them is kept until its size, data or settings change (CachedUsageHeader): this runs on every
+        // update of the song and many times a second during a drag.
+        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(CachedUsageHeader()) : PanelHeader.Music(c));
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -496,6 +506,7 @@ public partial class MainWindow
             }
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
         }
+        CurrentMusicLayout = layout;
         var body = new Grid();
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
         if (!Settings.MusicPageCover) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive);
@@ -543,7 +554,7 @@ public partial class MainWindow
                 // All lines share one size; only its color (MusicLyricColor) marks the current one.
                 if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
                 _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Foreground = LyricInk,
-                    Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                    Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.InkFade };
                 lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
                 if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
                 lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
@@ -753,7 +764,7 @@ public partial class MainWindow
     {
         string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
         var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
-            FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+            FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.InkFade };
         AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
         ShowCutText(title, track.Title + tail);
         _musicTitle = title; UpdateLyricScrolling();
@@ -808,7 +819,7 @@ public partial class MainWindow
             TextBlock Dim() { var line = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(line); return line; }
             _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
             _lyricCurrent = new MusicMarquee { FontSize = columns.CurrentLyric, Height = columns.CurrentLine, CenterWhenFits = false, Foreground = LyricInk,
-                Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.InkFade };
             lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
             _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
             middle.Children.Add(lyrics);
@@ -1006,7 +1017,7 @@ public partial class MainWindow
     private MusicMarquee CompactTitle(string text, double width, CompactMusicLayout layout)
     {
         var title = new MusicMarquee { Text = text, Width = width, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-            ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay,
+            ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.InkFade,
             Laps = true, Rested = text.Length > 0 && text == _compactTitleRested };
         title.Finished += () => { if (ReferenceEquals(_compactMarquee, title)) _compactTitleRested = title.Text; };
         title.Gliding += gliding => { if (ReferenceEquals(_compactMarquee, title)) MusicGliding(gliding); };
@@ -1037,26 +1048,34 @@ public partial class MainWindow
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        var steadyItems = Settings.ShowsSummary(EffectiveStyle) ? QuotaRings(Settings.EnabledApps) : [];
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         var countdown = CreateCandleCountdown(scale);
+        // The file transfer's count keeps one width, as the clock does; with both, they are counted as one fixed part with a gap between.
+        var transfer = TransferBadge(scale);
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // The devices' batteries keep one width too (as many devices as show, each with the room of its widest figure), counted with them.
+        var devices = CompactDevices(scale);
+        double devicesWidth = devices is null ? 0 : DevicePixels.Up(devices.PreferredWidth, dpi);
+        double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth);
         // The system readings ask for the width of everything chosen, on whole device pixels; the whole ones that fit their region show.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && marketFace == 0 && countdown is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
+            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null && marketFace == 0 && countdown is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
         _stripLayout = _stripAdmission.Layout;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0, equalizer: equalizer, barCount: Settings.EqualizerBars, showCover: showCover);
+        double ringDiameter = QuotaRing.Diameter(Settings.QuotaRingStyle);
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, fixedFace, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0, equalizer: equalizer, barCount: Settings.EqualizerBars, showCover: showCover, ring: ringDiameter);
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0, dpi: dpi, equalizer: equalizer, bars: Settings.EqualizerBars, cover: showCover);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, strip?.PreferredWidth ?? 0, marketFace, countdown?.ReservedWidth ?? 0, dpi: dpi, equalizer: equalizer, bars: Settings.EqualizerBars, cover: showCover, ring: ringDiameter);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
         var readingWidths = strip?.ItemWidths() ?? [];
-        double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
-            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars, showCover);
+        double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, fixedFace,
+            steadyRings > 0 ? CompactMusicLayout.RingSizeFor(ringDiameter, scale) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars, showCover);
         // Keep whole original readings visible while the custom ticker and countdown share the remaining space.
         int extraParts = (marketFace > 0 ? 1 : 0) + (countdown is not null ? 1 : 0);
         if (extraParts > 0)
@@ -1066,7 +1085,7 @@ public partial class MainWindow
             double ratio = extras > 0 ? Math.Min(1, Math.Max(0, contentWidth - required - gaps) / extras) : 0;
             double marketWidth = layout.MarketWidth * ratio, countdownWidth = layout.CountdownWidth * ratio;
             layout = CompactMusicLayout.Calculate(Math.Max(0, contentWidth - marketWidth - countdownWidth - gaps), scale, media, apps.Count,
-                text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer: equalizer, barCount: Settings.EqualizerBars, showCover: showCover) with
+                text.Length > 0, fixedFace, strip?.PreferredWidth ?? 0, equalizer: equalizer, barCount: Settings.EqualizerBars, showCover: showCover, ring: ringDiameter) with
             { ContentWidth = contentWidth, MarketWidth = marketWidth, CountdownWidth = countdownWidth, MonitorAlone = false, ClockAlone = false };
         }
         CurrentCompactLayout = layout;
@@ -1081,7 +1100,8 @@ public partial class MainWindow
         // the rest, and they widen by turns. Room neither can use goes back to the title, then to the gaps between the parts,
         // before the row is centred (CompactSpacing.Arrange).
         bool hasCover = media && showCover && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = equalizer && layout.EqualizerWidth >= layout.EqualizerSize - .001;
-        bool hasClock = clock is not null && layout.ClockWidth >= clock.ReservedWidth - .001, hasText = layout.TextWidth > 0 && text.Length > 0;
+        bool hasFixed = fixedFace > 0 && layout.ClockWidth >= fixedFace - .001;
+        bool hasClock = clock is not null && hasFixed, hasTransfer = transfer is not null && hasFixed, hasDevices = devices is not null && hasFixed, hasText = layout.TextWidth > 0 && text.Length > 0;
         double titleWanted = hasText ? layout.TextWidth : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
         double titleShare = hasText ? Math.Min(titleWanted, Math.Max(shortest, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale))) : 0;
@@ -1089,10 +1109,10 @@ public partial class MainWindow
         var ringWidths = apps.Select(_ => layout.RingSize).ToList();
         bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
         bool hasMarket = layout.MarketWidth > 0, hasCountdown = countdown is not null && layout.CountdownWidth > 0;
-        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0)
+        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasTransfer ? 1 : 0) + (hasDevices ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0)
             + (hasMarket ? 1 : 0) + (hasCountdown ? 1 : 0);
         double others = (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0)
-            + layout.MarketWidth + layout.CountdownWidth + Math.Max(0, parts - 1) * unit;
+            + (hasTransfer ? transferWidth : 0) + (hasDevices ? devicesWidth : 0) + layout.MarketWidth + layout.CountdownWidth + Math.Max(0, parts - 1) * unit;
         double pool = SnapDown(contentWidth, dpi) - others - titleShare;
         // Too short for both narrowest windows, the title gives way down to its shortest.
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
@@ -1125,6 +1145,8 @@ public partial class MainWindow
             else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
             else if (part == CompactPart.Equalizer && hasEqualizer) shown.Add((part, new(layout.EqualizerSize)));
             else if (part == CompactPart.Clock && hasClock) shown.Add((part, new(clock!.ReservedWidth)));
+            else if (part == CompactPart.Transfer && hasTransfer) shown.Add((part, new(transferWidth)));
+            else if (part == CompactPart.Devices && hasDevices) shown.Add((part, new(devicesWidth)));
             else if (part == CompactPart.Market && hasMarket) shown.Add((part, new(layout.MarketWidth)));
             if (part == CompactPart.Clock && hasClock && hasCountdown) shown.Add(("countdown", new(layout.CountdownWidth)));
         }
@@ -1157,8 +1179,13 @@ public partial class MainWindow
                     var zone = CollapsedHover.Zone(shape.Style, shape.Surface, WorkDip.Y);
                     CompactMarketHoverArea = new Rect(marketLeft, zone.Y, Math.Max(0, marketRight - marketLeft), zone.Height);
                     break;
+                case CompactPart.Transfer:
+                    element = CompactRegion(transfer!, room, transferWidth, transfer!.Height, row, RegionAnchor.Left, dpi); break;
+                case CompactPart.Devices:
+                    devices!.Width = devicesWidth;
+                    element = CompactRegion(devices, room, devicesWidth, devices.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                    element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
@@ -1181,17 +1208,13 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
-    // letter inside when the setting asks for it, so the rings are told apart by more than their color.
-    private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    // One ring per application (QuotaRing.For), in the chosen style with the application's chosen quotas, every quota in the
+    // tooltip, and the application's letter inside when the setting asks for it, so the rings are told apart by more than their color.
+    private (IReadOnlyList<double?> Shares, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
-        var snapshot = DashboardUsage.Quota(entry, Snapshots);
-        var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
-        double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
-        string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
-            : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
+        var ring = QuotaRing.For(DashboardUsage.Quota(entry, Snapshots), entry, Settings.QuotaRingStyle, Settings.QuotaRingRemaining);
         // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
-        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
+        return (ring.Shares, PanelTheme.QuotaTheme(entry), entry.Name + " · " + ring.Detail, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
     // The collapsed equalizer and the music page's share one color.
     private Brush EqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");

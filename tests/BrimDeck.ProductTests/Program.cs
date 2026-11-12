@@ -100,10 +100,18 @@ internal static class Program
                     s.PageOrder = [DeckPage.Market, DeckPage.Monitor, DeckPage.Music, DeckPage.Usage];
                     window.SelectPage(DeckPage.Market, remember: false);
                     var pageButtons = (Panel)((Button)window.FindName("AIUsageButton")).Parent;
-                    Check("The market page follows the upstream customizable page order", pageButtons.Children.OfType<Button>().Select(button => button.Name)
+                    Check("The market page follows the upstream customizable page order", pageButtons.Children.OfType<Button>().Where(button => button.Visibility == Visibility.Visible).Select(button => button.Name)
                         .SequenceEqual(["MarketPageButton", "MonitorPageButton", "MusicPageButton", "AIUsageButton"]));
                     s.PageOrder = [.. DeckPages.Order]; window.SelectPage(DeckPage.Usage, remember: false);
                     CheckMarketList(window);
+                    s.ClipboardPage = s.DevicesPage = true;
+                    foreach (var page in new[] { DeckPage.Market, DeckPage.Clipboard, DeckPage.Devices, DeckPage.Usage, DeckPage.Monitor, DeckPage.Music })
+                    {
+                        window.SelectPage(page, remember: false);
+                        var contents = new[] { "UsageContent", "MusicContent", "MonitorContent", "MarketContent", "ShelfContent", "DevicesContent" };
+                        Check($"{style}: {page} shows one page alongside the retained market module", contents.Count(name => ((FrameworkElement)window.FindName(name)).Visibility == Visibility.Visible) == 1);
+                    }
+                    s.ClipboardPage = s.DevicesPage = false;
                     var sizes = (s.Width, s.Height, s.MusicWidth, s.MusicHeight, s.MonitorWidth, s.MonitorHeight);
                     s.MarketWidth = 1000; window.SelectPage(DeckPage.Market, remember: false);
                     double actualMarketWidth = (double)typeof(MainWindow).GetField("_pageWidth", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
@@ -276,6 +284,9 @@ internal static class Program
         try { app = new BrimDeck.App { ShutdownMode = ShutdownMode.OnExplicitShutdown }; }
         finally { hooks.OperationPosted -= posted; }
         foreach (var operation in pending) operation.Abort();
+        app.Settings.ClipboardPage = false; app.Settings.DevicesPage = false;
+        var folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-Product-Shelf-" + Guid.NewGuid().ToString("N"));
+        typeof(BrimDeck.App).GetProperty("Shelf", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, new ShelfService(folder, Dispatcher.CurrentDispatcher));
         return app;
     }
 }

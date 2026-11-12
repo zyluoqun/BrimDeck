@@ -32,7 +32,6 @@ internal sealed class ModelDatePicker : Border
     internal UsageDateRange? SelectedRange => _start <= _end ? new(_start, _end) : null;
 
     private readonly StackPanel _body = new();
-    private readonly Button[] _fields = new Button[2];
     private readonly TextBlock[] _fieldValues = new TextBlock[2];
     private readonly Border _fieldMark;
     private readonly TranslateTransform _fieldShift = new();
@@ -117,7 +116,7 @@ internal sealed class ModelDatePicker : Border
             field.Padding = new Thickness(7, 2, 7, 2); field.Background = Brush("input"); field.BorderBrush = Brush("outline");
             field.FocusVisualStyle = TryFindResource("PanelOutsetKeyboardFocus") as Style;
             Grid.SetColumn(field, end ? 2 : 0); fields.Children.Add(field);
-            _fields[end ? 1 : 0] = field; _fieldValues[end ? 1 : 0] = value;
+            _fieldValues[end ? 1 : 0] = value;
         }
         _fieldMark = new Border { BorderBrush = Brush("accent"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Radius), IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Left, Width = (Inner - FieldGap) / 2, RenderTransform = _fieldShift };
@@ -237,7 +236,7 @@ internal sealed class ModelDatePicker : Border
 
     private Button MonthButton(bool next)
     {
-        var icon = UI.Centered(next ? "" : "", 10, Hex("textPrimary"), font: new FontFamily("Segoe MDL2 Assets"));
+        var icon = UI.Centered(next ? "" : "", 10, Hex("textPrimary"), font: Fonts.IconMdl2);
         icon.ClearValue(TextBlock.ForegroundProperty);
         return Control(icon, next ? Loc.T("下个月", "Next month") : Loc.T("上个月", "Previous month"), () => ShowMonth(_month.AddMonths(next ? 1 : -1), true));
     }
