@@ -71,7 +71,7 @@ public partial class App
             rotation.Name = targetWorkspace.Name;
             step = "prepare Chrome window";
             LogChartRequest($"Market chart begin workspace={connection.WorkspaceId} symbol={coin.Symbol}");
-            await _chromeCharts.EnsureAsync(connection.WorkspaceId, Lifetime.Token);
+            await _chromeCharts.EnsureAsync(connection.WorkspaceId, Settings.MarketChartDisplay, Settings.MarketChartFullscreen, Lifetime.Token);
             // A queued click has not contacted the service yet. Only an active request has a timeout.
             step = "switch and confirm pane";
             var result = await chartClient.SwitchAsync(coin, Lifetime.Token, rotation);

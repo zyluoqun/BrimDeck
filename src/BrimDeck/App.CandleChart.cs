@@ -24,7 +24,7 @@ public partial class App
             MarketChartStatus = Loc.T($"正在打开 BTC&ETH · {CandleCountdown.Label(period)}…", $"Opening BTC&ETH · {CandleCountdown.Label(period)}…"); MarketUpdated?.Invoke();
             step = "prepare Chrome window";
             _chromeCharts ??= new Native.ChromeChartBridge(diagnostic: LogChartRequest);
-            await _chromeCharts.EnsureAsync(workspace, deadline.Token);
+            await _chromeCharts.EnsureAsync(workspace, Settings.MarketChartDisplay, Settings.MarketChartFullscreen, deadline.Token);
             step = "switch and confirm both panes";
             var pair = new OpenMarketChartClient(_chartHttp, connection.Token, workspace, LogChartRequest);
             await pair.SwitchPairAsync(period, deadline.Token);

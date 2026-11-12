@@ -507,6 +507,9 @@ public sealed class DeckSettings
     public int MarketCount(MarketRanking ranking) => Math.Clamp(MarketCounts?.GetValueOrDefault(ranking, 20) ?? 20, 1, 50);
     public List<int> MarketChartPinnedPanes { get; set; } = [];
     public Dictionary<string, ChartRotationSettings> MarketChartWorkspaces { get; set; } = [];
+    // Shared by every workspace. Null retains the original display-2 target until a monitor is chosen.
+    public ChosenDisplay? MarketChartDisplay { get; set; }
+    public bool MarketChartFullscreen { get; set; } = true;
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value, capsule: true); }
@@ -697,6 +700,7 @@ public sealed class DeckSettings
         MarketRankings = (MarketRankings ?? [MarketRanking]).Where(Enum.IsDefined).Distinct().ToList();
         MarketCounts = (MarketCounts ?? []).Where(pair => Enum.IsDefined(pair.Key)).ToDictionary(pair => pair.Key, pair => Math.Clamp(pair.Value, 1, 50));
         MarketChartPinnedPanes = (MarketChartPinnedPanes ?? []).Where(pane => pane is >= 1 and <= 3).Distinct().Take(2).ToList();
+        MarketChartDisplay = MarketChartDisplay is { } display && !string.IsNullOrWhiteSpace(display.Id) ? display with { Name = display.Name ?? "" } : null;
         MarketChartWorkspaces = (MarketChartWorkspaces ?? []).Where(pair => pair.Key.Length > 0 && pair.Value is not null).ToDictionary(pair => pair.Key, pair => new ChartRotationSettings {
             Name = pair.Value.Name ?? "", LayoutSignature = pair.Value.LayoutSignature ?? "", Interval = ChartIntervals.Normalize(pair.Value.Interval),
             PinnedPanes = (pair.Value.PinnedPanes ?? []).Where(pane => pane >= 0).Distinct().Order().ToList() });

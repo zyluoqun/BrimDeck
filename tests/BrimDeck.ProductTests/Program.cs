@@ -27,11 +27,19 @@ internal static class Program
         {
             var app = CreateFixtureApp();
             app.InitializeComponent(); PanelTheme.Use(app.Settings);
-            ChartSwitchFeedbackUiTests.Run(app, Check);
-            if (args is ["--chart-feedback"]) { Console.WriteLine($"{_checks} chart feedback checks passed."); return 0; }
             using var lyrics = new LyricsService();
             typeof(BrimDeck.App).GetProperty("Lyrics", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, lyrics);
+            ChartWindowTests.Run(Check).GetAwaiter().GetResult();
+            if (args is ["--chart-window"])
+            {
+                app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);
+                ChartWindowUiTests.Run(app, Check);
+                Console.WriteLine($"{_checks} chart window checks passed."); return 0;
+            }
+            ChartSwitchFeedbackUiTests.Run(app, Check);
+            if (args is ["--chart-feedback"]) { Console.WriteLine($"{_checks} chart feedback checks passed."); return 0; }
             app.Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(AppContext.BaseDirectory), AppContext.BaseDirectory);
+            ChartWindowUiTests.Run(app, Check);
             CapsuleAvoidanceUiTests.Run(app, Check);
             if (args is ["--capsule-avoidance"]) { Console.WriteLine($"{_checks} capsule avoidance UI checks passed."); return 0; }
             MarketAutoWidthUiTests.Run(app, Check);

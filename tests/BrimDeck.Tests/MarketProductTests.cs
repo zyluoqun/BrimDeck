@@ -33,6 +33,15 @@ internal static class MarketProductTests
         settings.MarketWidth = double.NaN; settings.MarketHeight = double.PositiveInfinity; settings.Normalize();
         check("Market dimensions normalize without corrupting original settings", double.IsFinite(settings.MarketWidth) && double.IsFinite(settings.MarketHeight));
         check("Existing settings start with all three chart panes available", new DeckSettings().MarketChartPinnedPanes.Count == 0);
+        var chartDefaults = SettingsMigrations.Read("{}");
+        check("Existing chart settings retain display 2 and F11 fullscreen by default", chartDefaults.MarketChartDisplay is null && chartDefaults.MarketChartFullscreen);
+        settings.MarketChartDisplay = new ChosenDisplay("monitor-path", "Chart monitor"); settings.MarketChartFullscreen = false;
+        restored = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
+        check("The shared chart monitor and disabled fullscreen survive settings reload", restored.MarketChartDisplay == settings.MarketChartDisplay && !restored.MarketChartFullscreen);
+        var chartCopy = settings.Copy(); chartCopy.MarketChartDisplay = new ChosenDisplay("other-monitor", "Other"); chartCopy.MarketChartFullscreen = true;
+        check("Editing shared chart options in a copy leaves saved options intact", settings.MarketChartDisplay.Id == "monitor-path" && !settings.MarketChartFullscreen);
+        restored = SettingsMigrations.Read("""{"MarketChartDisplay":{"Id":null,"Name":null},"MarketChartFullscreen":false}""");
+        check("An invalid chart monitor safely restores the legacy target without enabling fullscreen", restored.MarketChartDisplay is null && !restored.MarketChartFullscreen);
         settings.MarketChartPinnedPanes = [1, 3];
         restored = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Pinned chart panes survive settings reload", restored.MarketChartPinnedPanes.SequenceEqual([1, 3]));

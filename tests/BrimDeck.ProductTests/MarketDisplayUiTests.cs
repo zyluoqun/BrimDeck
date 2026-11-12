@@ -70,6 +70,10 @@ internal static class MarketDisplayUiTests
                 int before = target.Children.Count;
                 typeof(SettingsWindow).GetMethod("MarketChartControls", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
                 var workspaceControls = target.Children.Cast<DependencyObject>().Skip(before).SelectMany(Descendants).ToArray();
+                check("All workspaces share an enabled chart monitor selector", workspaceControls.OfType<ComboBox>()
+                    .Single(box => AutomationProperties.GetName(box) == Loc.T("图表打开显示器", "Chart display")) is { IsEnabled: true, SelectedIndex: >= 0 });
+                check("Shared chart fullscreen defaults to F11 fullscreen", workspaceControls.OfType<CheckBox>()
+                    .Single(box => AutomationProperties.GetName(box) == Loc.T("F11 全屏打开", "Open in F11 fullscreen")).IsChecked == true);
                 check("Workspace settings expose a named selector instead of a manually typed chart id", workspaceControls.OfType<ComboBox>()
                     .Count(box => AutomationProperties.GetName(box) == Loc.T("胶囊切换目标方案", "Workspace for market clicks")) == 1);
                 check("Layout approval stays disabled until a workspace is detected", workspaceControls.OfType<Button>()

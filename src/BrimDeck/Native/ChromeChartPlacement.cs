@@ -8,8 +8,12 @@ namespace BrimDeck.Native;
 internal static class ChromeChartPlacement
 {
     internal readonly record struct WindowCandidate(IntPtr Handle, string Title);
-    internal static DisplayInfo TargetDisplay() => Displays.Current().FirstOrDefault(d => d.Device.Equals(@"\\.\DISPLAY2", StringComparison.OrdinalIgnoreCase))
-        ?? throw new InvalidOperationException(Loc.T("未找到 2 号显示器，请检查 Windows 显示设置后重试", "Display 2 is not connected; check Windows display settings"));
+    internal static DisplayInfo TargetDisplay(ChosenDisplay? chosen, IReadOnlyList<DisplayInfo> displays)
+        => (chosen is null ? displays.FirstOrDefault(d => d.Device.Equals(@"\\.\DISPLAY2", StringComparison.OrdinalIgnoreCase))
+            : displays.FirstOrDefault(d => d.Id.Equals(chosen.Id, StringComparison.OrdinalIgnoreCase)))
+        ?? throw new InvalidOperationException(chosen is null
+            ? Loc.T("未找到 2 号显示器，请检查 Windows 显示设置后重试", "Display 2 is not connected; check Windows display settings")
+            : Loc.T($"图表显示器“{chosen.Name}”未连接，请在行情设置中重新选择显示器。", $"Chart display '{chosen.Name}' is not connected; choose a display in market settings."));
     internal static async Task MaximizeAsync(DisplayInfo display, string tabTitle, CancellationToken cancellation, Action<string>? diagnostic = null)
     {
         var window = await WaitForWindowAsync(tabTitle, ReadWindows, Activate, cancellation, diagnostic).ConfigureAwait(false);
@@ -18,10 +22,10 @@ internal static class ChromeChartPlacement
         var bounds = display.Bounds;
         if (!SetWindowPos(window, IntPtr.Zero, (int)bounds.Left + 40, (int)bounds.Top + 40,
             Math.Max(320, (int)bounds.Width - 80), Math.Max(240, (int)bounds.Height - 80), 0x0004))
-            throw new InvalidOperationException(Loc.T("无法将四屏窗口移到 2 号屏，请重试", "Could not move the chart window to display 2"));
+            throw new InvalidOperationException(Loc.T("无法将图表窗口移到目标显示器，请重试", "Could not move the chart window to the selected display"));
         ShowWindow(window, 3);
         if (MonitorFromWindow(window, 2) != display.Handle || !IsZoomed(window))
-            throw new InvalidOperationException(Loc.T("四屏窗口尚未在 2 号屏最大化，请重试", "The chart window is not maximized on display 2; retry"));
+            throw new InvalidOperationException(Loc.T("图表窗口尚未在目标显示器最大化，请重试", "The chart window is not maximized on the selected display; retry"));
     }
     internal static async Task<bool> IsOnDisplayAsync(DisplayInfo display, string tabTitle, CancellationToken cancellation, Action<string>? diagnostic = null)
     {

@@ -44,7 +44,8 @@ public sealed partial class SettingsWindow
         var heading = TextLine(Loc.T("网页图表联动", "Browser chart connection"), 13, TextPrimary, FontWeights.SemiBold);
         heading.Margin = new Thickness(0, 16, 0, 8); Target.Children.Add(heading);
         var panel = new StackPanel(); Target.Children.Add(panel);
-        panel.Children.Add(TextLine(Loc.T("先选择胶囊切换使用的方案，再点击布局中的图表设置固定。未固定的图表按编号轮换，使用此方案所选的周期；固定图表保留币种和周期。目标方案仍在 2 号显示器全屏打开。", "Choose the workspace for market clicks, then click charts below to pin them. Unpinned charts rotate using this workspace's interval; pinned charts keep their market and interval. The target workspace still opens fullscreen on display 2."), 11, TextSecondary));
+        panel.Children.Add(TextLine(Loc.T("先选择胶囊切换使用的方案，再点击布局中的图表设置固定。未固定的图表按编号轮换，使用此方案所选的周期；固定图表保留币种和周期。", "Choose the workspace for market clicks, then click charts below to pin them. Unpinned charts rotate using this workspace's interval; pinned charts keep their market and interval."), 11, TextSecondary));
+        panel.Children.Add(MarketChartWindowControls());
         var status = TextLine("", 11, TextSecondary); status.Margin = new Thickness(0, 6, 0, 6);
         string legacyWorkspace = "", savedWorkspace = "";
         try

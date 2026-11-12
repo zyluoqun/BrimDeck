@@ -61,10 +61,19 @@ internal sealed class ChromeChartBridge : IDisposable
         }
     }
 
-    public async Task EnsureAsync(string workspaceId, CancellationToken cancellation)
+    internal static async Task ApplyWindowStateAsync(bool wasFullscreen, bool onTarget, bool fullscreen,
+        Func<string, Task> setState, Func<Task> maximize)
+    {
+        bool staysFullscreen = fullscreen && wasFullscreen && onTarget;
+        if (wasFullscreen && !staysFullscreen) await setState("normal").ConfigureAwait(false);
+        if (!staysFullscreen) await maximize().ConfigureAwait(false);
+        if (fullscreen) await setState("fullscreen").ConfigureAwait(false);
+    }
+
+    public async Task EnsureAsync(string workspaceId, ChosenDisplay? selectedDisplay, bool fullscreen, CancellationToken cancellation)
     {
         workspaceId = OpenMarketChartClient.ParseWorkspace(workspaceId);
-        var display = ChromeChartPlacement.TargetDisplay();
+        var display = ChromeChartPlacement.TargetDisplay(selectedDisplay, Displays.Current());
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
         long expiresAt = DateTimeOffset.UtcNow.AddSeconds(30).ToUnixTimeMilliseconds();
@@ -96,19 +105,17 @@ internal sealed class ChromeChartBridge : IDisposable
             bool onTarget = await ChromeChartPlacement.IsOnDisplayAsync(display, windowIdentity, deadline.Token, _diagnostic).ConfigureAwait(false);
             // Monitor coordinates may differ across DPI settings. Never move a shared source window as a fallback.
             if (!onTarget && !(result.TryGetProperty("singleTab", out var single) && single.ValueKind == JsonValueKind.True))
-                throw new InvalidOperationException(Loc.T("图表标签尚未移到 2 号屏，已保留原窗口位置，请检查显示器缩放或重试。", "The chart tab is not on display 2. The source window was left in place; check display scaling and retry."));
-            bool staysFullscreen = wasFullscreen && onTarget;
+                throw new InvalidOperationException(Loc.T("图表标签尚未移到目标显示器，已保留原窗口位置，请检查显示器缩放或重试。", "The chart tab is not on the selected display. The source window was left in place; check display scaling and retry."));
             async Task SetState(string requested)
             {
                 var changed = await RequestWindowAsync(workspaceId, deadline.Token, expiresAt, "window_state", windowId, tabId, requested).ConfigureAwait(false);
                 if (!changed.TryGetProperty("ok", out var accepted) || accepted.ValueKind != JsonValueKind.True
                     || !changed.TryGetProperty("state", out var actual) || actual.GetString() != requested)
-                    throw new InvalidOperationException(Loc.T("Chrome 尚未确认四屏全屏状态，请检查扩展后重试", "Chrome did not confirm the chart window state; check the extension and retry"));
+                    throw new InvalidOperationException(Loc.T("Chrome 尚未确认图表窗口状态，请检查扩展后重试", "Chrome did not confirm the chart window state; check the extension and retry"));
             }
-            if (wasFullscreen && !staysFullscreen) await SetState("normal").ConfigureAwait(false);
-            if (!staysFullscreen) await ChromeChartPlacement.MaximizeAsync(display, windowIdentity, deadline.Token, _diagnostic).ConfigureAwait(false);
-            await SetState("fullscreen").ConfigureAwait(false);
-            _diagnostic?.Invoke("Chrome fullscreen confirmed on display 2");
+            await ApplyWindowStateAsync(wasFullscreen, onTarget, fullscreen, SetState,
+                () => ChromeChartPlacement.MaximizeAsync(display, windowIdentity, deadline.Token, _diagnostic)).ConfigureAwait(false);
+            _diagnostic?.Invoke($"Chrome {(fullscreen ? "fullscreen" : "maximized")} confirmed on {display.Device}");
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         { throw new InvalidOperationException(Loc.T("Chrome 四屏联动未就绪。请确认已在使用的 Chrome 用户中加载 BrimDeck Chart Window 扩展，再重试。", "Chrome chart connection is not ready. Load BrimDeck Chart Window in your Chrome profile, then retry.")); }
