@@ -287,6 +287,7 @@ internal static class Program
         app.Settings.ClipboardPage = false; app.Settings.DevicesPage = false;
         var folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-Product-Shelf-" + Guid.NewGuid().ToString("N"));
         typeof(BrimDeck.App).GetProperty("Shelf", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, new ShelfService(folder, Dispatcher.CurrentDispatcher));
+        typeof(BrimDeck.App).GetProperty("ClipboardSync", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(app, new ClipboardSyncService(app, folder));
         return app;
     }
 }

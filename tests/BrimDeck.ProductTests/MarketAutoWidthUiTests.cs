@@ -79,6 +79,17 @@ internal static class MarketAutoWidthUiTests
                         double right = child.TransformToAncestor(compact).Transform(new Point(child.ActualWidth, 0)).X;
                         check($"{name} remains visible within the automatic row", child.ActualWidth > 0 && left >= -1 && right <= compact.Width + 1);
                     }
+                    s.MusicTitleAutoWidth = true;
+                    window.RenderCompact(); Layout(window, s, dpi);
+                    double shortTitle = Wanted(window);
+                    typeof(MainWindow).GetField("_mediaTrack", Instance)!.SetValue(window,
+                        new MediaTrack { Id = "auto-width-test", Title = "A much longer title sharing the row with market quotes and candle countdowns", State = BrimDeck.Core.MediaState.Paused });
+                    window.RenderCompact(); Layout(window, s, dpi);
+                    check("Following the title length still widens a row with market and countdown content", Wanted(window) > shortTitle + 100);
+                    check("Following the title length keeps the six-coin ticker visible", ((MarketTickerStrip)Field(window, "_marketStrip")!).Width >= six - 1);
+                    var title = (FrameworkElement)Field(window, "_compactMarquee")!;
+                    check("A longer title receives the extra room beside market and countdown content", title.ActualWidth > 200);
+                    s.MusicTitleAutoWidth = false;
                     Layout(window, s, dpi, 800);
                     check("Automatic capsule stays within a narrow screen", window.Collapsed.Surface.Width <= 800 && window.CurrentCompactLayout!.MarketWidth > 0);
                     s.NotchAutoWidth = s.CapsuleAutoWidth = false; window.RenderCompact();

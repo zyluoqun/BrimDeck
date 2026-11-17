@@ -18,6 +18,7 @@ public sealed record MediaTrack
     public bool IsQqMusic => Source == "QQ 音乐" || SongId.StartsWith("qq:", StringComparison.Ordinal) || SongId.StartsWith("qqid:", StringComparison.Ordinal);
     public bool IsAppleMusic => Source == "Apple Music";
     public bool IsKugou => Source == "酷狗音乐" || SongId.StartsWith("kugou:", StringComparison.Ordinal);
+    public bool IsQueMusic => Source == LyricsService.QueMusicSource;
     public MediaState State { get; init; }
     public bool IsNeteaseLog { get; init; }
     public bool PreviousRestricted { get; init; }
@@ -179,22 +180,48 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // keeps its width from line to line; a longer line scrolls in it.
     public const double TextSlot = 160;
 
+    // The middle text's room when it follows its length (DeckSettings.MusicLyricAutoWidth for the lyric, MusicTitleAutoWidth for
+    // the title), at scale 1. It is never shorter than FollowSlotMin, so a short line or the pause between lines does not shrink
+    // the surface to a sliver. The room itself has no longest: only the screen ends it (FollowWidth's limit), and text longer
+    // than the room the screen leaves scrolls in it. (It stopped at 400 DIP and at half the screen until 1.3.1: a surface
+    // already wider than that for its other parts kept the fixed slot, and a long line scrolled far from the screen's ends.)
+    public const double FollowSlotMin = 48;
+    // The room for text textWidth DIPs wide (its drawn width), at this scale, in whole DIPs: one DIP is added so rounding never
+    // makes fitting text scroll.
+    public static double FollowSlot(double textWidth, double scale)
+    {
+        double s = SafeScale(scale), wanted = double.IsFinite(textWidth) && textWidth > 0 ? Math.Ceiling(textWidth - 1e-9) + 1 : 0;
+        return Math.Max(wanted, Whole(FollowSlotMin * s));
+    }
+    // The content width an auto-width surface takes with the middle text following its length: natural, the width with the
+    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width of
+    // the widest surface the style may be on its monitor (the screen for the notch, the work area for the capsule). Text that
+    // would pass the limit stops there, unless the content needs more with the fixed slot, whose width it then keeps; a
+    // non-finite limit leaves the natural width.
+    public static double FollowWidth(double natural, double steady, double limit)
+    {
+        if (!double.IsFinite(limit) || natural <= limit) return natural;
+        return Math.Max(Math.Max(0, limit), Math.Min(steady, natural));
+    }
+
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
     // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
     // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
     // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace = 0, double countdownFace = 0, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true, double ring = QuotaRing.Nested)
-        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, marketFace, countdownFace, equalizer ?? media, bars, cover, ring), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, marketFace, countdownFace, equalizer ?? media, bars, cover, ring);
+    // ring: the rings' diameter at scale 1 (QuotaRing.Diameter). textSlot: the middle text's room in DIPs at this scale (FollowSlot); 0
+    // for the fixed slot (TextSlot).
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace = 0, double countdownFace = 0, double dpi = 0, bool? equalizer = null, int bars = DefaultBars, bool cover = true, double ring = QuotaRing.Nested, double textSlot = 0)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, marketFace, countdownFace, equalizer ?? media, bars, cover, ring, textSlot), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, marketFace, countdownFace, equalizer ?? media, bars, cover, ring, textSlot);
 
-    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace, double countdownFace, bool equalizer, int count, bool cover, double ring)
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double marketFace, double countdownFace, bool equalizer, int count, bool cover, double ring, double textSlot)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), market = Safe(marketFace);
         rings = Math.Max(0, rings);
         // Media without the cover shows only its text and the equalizer, which are counted on their own.
         media &= cover;
         double width = media ? Whole(20 * s) + Whole(8 * s) : 0;
-        width += RingsAndText(s, rings, text, RingSizeFor(ring, s));
+        width += RingsAndText(s, rings, text, RingSizeFor(ring, s), textSlot);
         bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0 && market == 0 && !equalizer;
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
         width += !equalizer ? 0 : media || rings > 0 || text || monitor > 0 || market > 0 ? BarsWidth(count, s) + Whole(8 * s) : BarsWidth(count, s);
@@ -208,11 +235,11 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public static double RingSizeFor(double ring, double scale) => Math.Max(1, Whole((double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested) * SafeScale(scale)));
 
     // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
-    private static double RingsAndText(double s, int rings, bool text, double size)
+    private static double RingsAndText(double s, int rings, bool text, double size, double textSlot = 0)
     {
         double ringSpan = rings == 0 ? 0 : rings * size + (rings - 1) * Whole(8 * s);
         // Beside a lyric the rings may take at most 40 % of the middle (Calculate), so the middle is wide enough for that too.
-        double desired = Whole(TextSlot * s);
+        double desired = double.IsFinite(textSlot) && textSlot > 0 ? Whole(textSlot) : Whole(TextSlot * s);
         return !text ? ringSpan : rings == 0 ? desired : Math.Max(Math.Ceiling(ringSpan / .4), ringSpan + Whole(8 * s) + desired);
     }
 
@@ -222,22 +249,22 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
     // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, double marketFace = 0, double countdownFace = 0, bool? equalizer = null, int barCount = DefaultBars, bool showCover = true, double ring = QuotaRing.Nested)
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, double marketFace = 0, double countdownFace = 0, bool? equalizer = null, int barCount = DefaultBars, bool showCover = true, double ring = QuotaRing.Nested, double textSlot = 0)
     {
         double market = Safe(marketFace), width = Safe(contentWidth), s = SafeScale(scale);
         if (Safe(countdownFace) > 0)
         {
-            double originalWidth = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring);
-            double countdownNatural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, countdownFace, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring);
+            double originalWidth = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring, textSlot: textSlot);
+            double countdownNatural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, countdownFace, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring, textSlot: textSlot);
             // Countdown digits shrink together in a fixed slot; narrow manual sizes still leave room for the original modules.
             double face = originalWidth > 0 ? Safe(countdownFace) * Math.Min(1, width / countdownNatural) : width;
             double countdownGap = originalWidth > 0 ? Math.Min(Whole(8 * s) * Math.Min(1, width / countdownNatural), Math.Max(0, width - face)) : 0;
-            var baseline = Calculate(Math.Max(0, width - face - countdownGap), s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, barCount: barCount, showCover: showCover, ring: ring);
+            var baseline = Calculate(Math.Max(0, width - face - countdownGap), s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, barCount: barCount, showCover: showCover, ring: ring, textSlot: textSlot);
             return baseline with { ContentWidth = width, CountdownWidth = face, CountdownGap = countdownGap, CountdownAlone = originalWidth == 0 };
         }
         if (market == 0) return CalculateCore(contentWidth, scale, media, rings, text, clockFace, monitorFace, companion: false, equalizer, barCount, showCover, ring);
         bool otherContent = (equalizer ?? media) || (media && showCover) || rings > 0 || text || Safe(clockFace) > 0 || Safe(monitorFace) > 0;
-        double natural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring);
+        double natural = NaturalWidth(s, media, rings, text, clockFace, monitorFace, market, equalizer: equalizer, bars: barCount, cover: showCover, ring: ring, textSlot: textSlot);
         double ratio = natural > 0 ? Math.Min(1, width / natural) : 0;
         // Original modules keep their natural slots; manual widening belongs to the scrolling market list.
         double region = otherContent ? market * ratio + Math.Max(0, width - natural) : width;
