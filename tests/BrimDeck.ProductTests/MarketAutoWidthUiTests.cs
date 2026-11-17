@@ -113,6 +113,11 @@ internal static class MarketAutoWidthUiTests
     private static void Layout(MainWindow window, DeckSettings settings, double dpi, double width = 3000)
     {
         var monitor = new DipRect(0, 0, width, 1500);
+        typeof(MainWindow).GetProperty(nameof(MainWindow.MonitorBoundsDip), Instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetProperty(nameof(MainWindow.WorkDip), Instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetField("_screenMonitor", Instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetField("_screenWork", Instance)!.SetValue(window, monitor);
+        window.RenderCompact();
         var shape = CollapsedGeometry.Resolve(settings, settings.Style, monitor, monitor, dpi, Wanted(window),
             (double)Field(window, "_compactRequired")!, window.Scale);
         typeof(MainWindow).GetProperty(nameof(MainWindow.Collapsed), Instance)!.SetValue(window, shape);
