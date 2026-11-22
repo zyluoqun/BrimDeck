@@ -42,7 +42,8 @@ internal static class CandleCountdownUiTests
             s.NotchMonitor = s.CapsuleMonitor = true; s.NotchMarket = s.CapsuleMarket = true;
             s.NotchCandleCountdown = s.CapsuleCandleCountdown = true; s.CandleCountdownPeriods = CandlePeriods.All;
             s.NotchAutoWidth = s.CapsuleAutoWidth = false;
-            s.Maximized = s.Borderless = s.Exclusive = WindowBehavior.Normal; s.FullscreenRules = [];
+            // The runner desktop may have another window over the capsule or notch. Test the chosen style.
+            s.Maximized = s.Borderless = s.Exclusive = s.Occupied = WindowBehavior.Normal; s.FullscreenRules = [];
             var window = new MainWindow(app);
             typeof(BrimDeck.App).GetProperty(nameof(BrimDeck.App.Deck))!.SetValue(app, window);
             try
@@ -50,23 +51,19 @@ internal static class CandleCountdownUiTests
                 var originalDpi = VisualTreeHelper.GetDpi(window);
                 bool originalAnimations = s.Animations;
                 foreach (bool animate in new[] { false, true })
-                foreach (double monitorWidth in new[] { 0d, 1024d })
+                foreach (double monitorWidth in new[] { 1920d, 1024d })
                 foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
                 foreach (double surface in new[] { 320d, 640d, 1000d, 1100d })
                 {
                     s.Animations = animate;
                     s.NotchWidth = s.CapsuleWidth = surface; window.ApplySettings();
-                    if (monitorWidth > 0)
-                    {
-                        var monitor = new DipRect(0, 0, monitorWidth, 768);
-                        var shape = CollapsedGeometry.Resolve(s, style, monitor, monitor, dpi);
-                        typeof(MainWindow).GetProperty(nameof(MainWindow.Collapsed), BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, shape);
-                    }
-                    VisualTreeHelper.SetRootDpi(window, new DpiScale(dpi, dpi)); window.RenderCompact();
+                    RenderOnMonitor(window, s, monitorWidth, dpi);
                     var compact = (Grid)window.FindName("Compact");
                     compact.Measure(new Size(compact.Width, compact.Height)); compact.Arrange(new Rect(0, 0, compact.Width, compact.Height)); compact.UpdateLayout();
-                    var countdown = (CandleCountdownStrip)typeof(MainWindow).GetField("_compactCountdown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
-                    var ticker = (MarketTickerStrip)typeof(MainWindow).GetField("_marketStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                    var countdown = typeof(MainWindow).GetField("_compactCountdown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) as CandleCountdownStrip;
+                    var ticker = typeof(MainWindow).GetField("_marketStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) as MarketTickerStrip;
+                    if (countdown is null || ticker is null)
+                        throw new InvalidOperationException($"{style}: expected ticker and countdown at {surface} DIPs / {dpi} DPI on a {monitorWidth}-DIP monitor. Shape: {window.Collapsed}; ticker present: {ticker is not null}; countdown present: {countdown is not null}.");
                     var end = countdown.TransformToAncestor(compact).Transform(new Point(countdown.ActualWidth, 0)).X;
                     var start = countdown.TransformToAncestor(compact).Transform(new Point()).X;
                     var tickerEnd = ticker.TransformToAncestor(compact).Transform(new Point(ticker.ActualWidth, 0)).X;
@@ -86,9 +83,9 @@ internal static class CandleCountdownUiTests
                     check($"{style}: upstream whole-reading layout keeps an actual monitor beside the custom modules at {surface} DIPs",
                         typeof(MainWindow).GetField("_compactStrip", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is MonitorStrip { ActualWidth: > 0 });
                 }
-                VisualTreeHelper.SetRootDpi(window, originalDpi);
                 s.Animations = originalAnimations;
-                s.NotchClock = s.CapsuleClock = true; window.RenderCompact();
+                s.NotchClock = s.CapsuleClock = true;
+                RenderOnMonitor(window, s, 1920, originalDpi.DpiScaleX);
                 check($"{style}: clock and countdown coexist", typeof(MainWindow).GetField("_compactClock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window) is ClockFace);
                 var timeRow = (Grid)window.FindName("Compact");
                 timeRow.Measure(new Size(timeRow.Width, timeRow.Height)); timeRow.Arrange(new Rect(0, 0, timeRow.Width, timeRow.Height)); timeRow.UpdateLayout();
@@ -116,6 +113,21 @@ internal static class CandleCountdownUiTests
         }
     }
 
+    private static void RenderOnMonitor(MainWindow window, DeckSettings settings, double width, double dpi)
+    {
+        // An unattached window can inherit a different virtual monitor on hosted Windows.
+        const BindingFlags instance = BindingFlags.NonPublic | BindingFlags.Instance;
+        var monitor = new DipRect(0, 0, width, 1080);
+        VisualTreeHelper.SetRootDpi(window, new DpiScale(dpi, dpi));
+        typeof(MainWindow).GetProperty(nameof(MainWindow.MonitorBoundsDip), instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetProperty(nameof(MainWindow.WorkDip), instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetField("_screenMonitor", instance)!.SetValue(window, monitor);
+        typeof(MainWindow).GetField("_screenWork", instance)!.SetValue(window, monitor);
+        var shape = CollapsedGeometry.Resolve(settings, settings.Style, monitor, monitor, dpi, panelScale: window.Scale);
+        typeof(MainWindow).GetProperty(nameof(MainWindow.Collapsed), instance)!.SetValue(window, shape);
+        window.RenderCompact();
+    }
+
     private static void CheckCombinedRow(BrimDeck.App app, MainWindow window, Action<string, bool> check)
     {
         var s = app.Settings;
@@ -130,7 +142,7 @@ internal static class CandleCountdownUiTests
             {
                 s.PanelScale = scale; window.ApplySettings();
                 track.SetValue(window, new MediaTrack { Id = "merge-layout-test", Title = "Combined layout", State = BrimDeck.Core.MediaState.Paused });
-                window.RenderCompact();
+                RenderOnMonitor(window, s, 1920, VisualTreeHelper.GetDpi(window).DpiScaleX);
                 var compact = (Grid)window.FindName("Compact");
                 compact.Measure(new Size(compact.Width, compact.Height)); compact.Arrange(new Rect(0, 0, compact.Width, compact.Height)); compact.UpdateLayout();
                 foreach (string name in new[] { "_quotaCarousel", "_compactMarquee", "_compactEqualizer", "_compactClock", "_compactStrip", "_marketStrip", "_compactCountdown" })
