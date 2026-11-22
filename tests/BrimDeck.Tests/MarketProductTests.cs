@@ -68,6 +68,12 @@ internal static class MarketProductTests
             && (int)CompactPart.Equalizer == 4 && (int)CompactPart.Clock == 5
             && (int)DeckPage.Clipboard == 4 && (int)DeckPage.Devices == 5
             && (int)CompactPart.Transfer == 6 && (int)CompactPart.Devices == 7);
+        var priorPages = SettingsMigrations.Read("""{"DefaultPage":6,"PageOrder":[5,4,3]}""");
+        var hoverOpening = SettingsMigrations.Read("""{"DefaultPage":7}""");
+        check("Upgrade 1.3.3: pointer-based opening keeps earlier custom page numbers",
+            priorPages.DefaultPage == DefaultDeckPage.Devices
+            && priorPages.PageOrder.Take(3).SequenceEqual([DeckPage.Devices, DeckPage.Clipboard, DeckPage.Market])
+            && hoverOpening.DefaultPage == DefaultDeckPage.Hover);
         foreach (double dpi in new[] { 1d, 1.25, 1.5, 2d })
         {
             double width = CompactMusicLayout.NaturalWidth(1, true, 3, true, 39.7, 150.2, 280, 260, dpi: dpi);
